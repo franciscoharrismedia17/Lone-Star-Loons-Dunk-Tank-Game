@@ -670,79 +670,6 @@ function mouseReleased(){
   if (gameState !== GAME.LEADGEN) endHold();
 }
 
-function touchStarted(){
-  resumeAudioIfNeeded(); // AUDIO: gate en primer input
-
-  // 🟢 Menú START (mismo flujo que mousePressed)
-  if (gameState === GAME.MENU){
-    const b = menu.btn;
-    const t = (touches && touches[0]) ? touches[0] : {x:mouseX, y:mouseY};
-    if (t.x >= b.x && t.x <= b.x + b.w && t.y >= b.y && t.y <= b.y + b.h){
-      b.pressed = true;
-    }
-    return false; // evita scroll/zoom del navegador
-  }
-
-  // Botones del overlay al final de nivel
-  if (gameState === GAME.LEVEL_END){
-    if (handleOverlayTapAt(mouseX, mouseY)) return false;
-  }
-
-  // Leadgen / tutorial
-  if (gameState === GAME.LEADGEN){ handleLeadgenMouse(); return false; }
-  if (tutorial.active){ tutorialDismiss(); return false; }
-
-  // Gesto de tiro
-  beginHold();
-  return false;
-}
-
-function touchEnded(){
-  // 🟢 Confirmación de START (mismo flujo que mouseReleased)
-  if (gameState === GAME.MENU){
-    const b = menu.btn;
-    const inside = mouseX >= b.x && mouseX <= b.x + b.w && mouseY >= b.y && mouseY <= b.y + b.h;
-    const wasPressed = b.pressed;
-    b.pressed = false;
-    if (wasPressed && inside){
-      _uiClickSound(); // AUDIO botón
-      if (CFG.LEADGEN.enabled){
-        leadgen.active = true;
-        gameState = GAME.LEADGEN;
-      } else {
-        startLevel();
-      }
-    }
-    return false;
-  }
-
-  if (gameState !== GAME.LEADGEN) endHold();
-  return false;
-}
-
-function touchEnded(){
-  // 🟢 Confirmación táctil del START (mismo flujo que mouseReleased)
-  if (gameState === GAME.MENU){
-    const b = menu.btn;
-    const inside = mouseX >= b.x && mouseX <= b.x + b.w && mouseY >= b.y && mouseY <= b.y + b.h;
-    const wasPressed = b.pressed;
-    b.pressed = false;
-    if (wasPressed && inside){
-      _uiClickSound(); // AUDIO botón
-      if (CFG.LEADGEN.enabled){
-        leadgen.active = true;
-        gameState = GAME.LEADGEN;
-      } else {
-        startLevel();
-      }
-    }
-    return false;
-  }
-
-  if (gameState !== GAME.LEADGEN) endHold();
-  return false;
-}
-
 // ---------- Gesto / Helpers ----------
 function getPointerScreen(){
   // [MOBILE] usar pointer “real” si hay toques activos
@@ -778,6 +705,10 @@ function setup(){
   window.addEventListener('orientationchange', onRotateFix, {passive:true});
   window.addEventListener('resize', fitToScreenNow, {passive:true});
   if (window.visualViewport) window.visualViewport.addEventListener('resize', fitToScreenNow, {passive:true});
+  // 🔹 AÑADIR ESTO:
+  _mobileInit();  // instala guards de scroll/zoom y primer gesto (fullscreen + lock)
+
+  
 
   // Carga previa de Leadgen desde localStorage (si existe)
   if (CFG.LEADGEN.saveToLocalStorage && window.localStorage){
@@ -787,9 +718,8 @@ function setup(){
   }
 
   // Inicializar volúmenes (mute si corresponde)
-  applyAudioVolumes();
-
-  goToMenu(); // AUDIO: play MAINMUSIC en menú dentro de goToMenu()
+    applyAudioVolumes();
+  goToMenu();
 }
 function windowResized(){ fitToScreenNow(); }
 
@@ -1220,13 +1150,42 @@ function mouseReleased(){
 function touchStarted(){
   resumeAudioIfNeeded(); // AUDIO: gate en primer input
 
+  // START en menú (hit-test en coords de pantalla)
+  if (gameState === GAME.MENU){
+    const b = menu.btn;
+    const t = (touches && touches[0]) ? touches[0] : {x:mouseX, y:mouseY};
+    const inside = t.x >= b.x && t.x <= b.x + b.w && t.y >= b.y && t.y <= b.y + b.h;
+    if (inside){
+      _uiClickSound(); // AUDIO botón
+      if (CFG.LEADGEN.enabled){
+        leadgen.active = true;
+        gameState = GAME.LEADGEN;
+      } else {
+        startLevel();
+      }
+    }
+    return false; // evita scroll/zoom del navegador
+  }
+
+  // Overlay de fin de nivel (Next/Retry)
+  if (gameState === GAME.LEVEL_END){
+    if (handleOverlayTapAt(mouseX, mouseY)) return false;
+  }
+
+  // Leadgen / Tutorial
   if (gameState === GAME.LEADGEN){ handleLeadgenMouse(); return false; }
   if (tutorial.active){ tutorialDismiss(); return false; }
+
+  // Gesto de tiro (solo en PLAY)
   beginHold();
   return false;
 }
-function touchEnded(){ if (gameState !== GAME.LEADGEN) endHold(); return false; }
 
+function touchEnded(){
+  // START ya se confirma en touchstart; acá solo cerramos gesto de tiro
+  if (gameState !== GAME.LEADGEN) endHold();
+  return false;
+}
 // ---------- Tutorial helpers ----------
 function tutorialDismiss(){
   if (tutorial.startMs){ const delay = millis() - tutorial.startMs; levelStartAt += delay; tutorial.startMs = 0; }
