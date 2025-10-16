@@ -1310,7 +1310,16 @@ function drawLeadgenOverlay(){
           BASE_W/2 - w/2, H.y - cropH/2, w, cropH);
   }
 
-  // Campos
+  
+  // Title text (mobile-friendly)
+  push();
+  if (FONT_MAIN) textFont(FONT_MAIN);
+  textAlign(CENTER, CENTER);
+  fill(255);
+  textSize(42);
+  text('fill out form to begin', BASE_W/2, (CFG.LEADGEN.header && CFG.LEADGEN.header.y ? CFG.LEADGEN.header.y + 60 : BASE_H*0.18));
+  pop();
+// Campos
   const P = CFG.LEADGEN.panel;
   const F = CFG.LEADGEN.fields;
   const I = CFG.LEADGEN.input;
@@ -1970,22 +1979,3 @@ function cropTransparent(src, alphaThreshold=1){
 
   requestAnimationFrame(tick);
 })();
-
-
-// ======== MOBILE RUNTIME GATE (Leadgen OFF on phones) ========
-(function(){
-  try {
-    const ua = navigator.userAgent || "";
-    const touch = (navigator.maxTouchPoints || 0) > 1;
-    const isIPhone = /iPhone|iPod/i.test(ua);
-    const isAndroid = /Android/i.test(ua);
-    const isIPad = /iPad/i.test(ua) || (touch && /Macintosh/.test(ua)); // iPadOS reports Mac
-    const IS_MOBILE_DEVICE = isIPhone || isAndroid || isIPad;
-
-    if (IS_MOBILE_DEVICE && CFG && CFG.LEADGEN) {
-      CFG.LEADGEN.enabled = false;
-      CFG.LEADGEN.showOnStart = false;
-    }
-  } catch (e) { /* noop */ }
-})();
-// ======== END MOBILE RUNTIME GATE ========
