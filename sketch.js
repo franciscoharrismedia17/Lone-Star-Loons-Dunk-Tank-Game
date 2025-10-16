@@ -413,145 +413,6 @@ let tutorial = { active:false, t:0, shown:{}, startMs:0 };
 // ---------- Viento visual ----------
 let windSpr = { x:0 };
 
-
-// ====== MOBILE LEADGEN: overlay inputs visibles (forzar teclado) ======
-let _leadgenOverlays = null;
-
-function _ensureLeadgenOverlays(){
-  if (_leadgenOverlays) return _leadgenOverlays;
-  const c = document.createElement('div');
-  c.id = 'leadgen-overlays';
-  Object.assign(c.style, {
-    position: 'fixed',
-    left: '0px',
-    top: '0px',
-    width: '100vw',
-    height: '100vh',
-    zIndex: '9999',
-    pointerEvents: 'none'
-  });
-  document.body.appendChild(c);
-  _leadgenOverlays = { container: c, inputs: [] };
-  return _leadgenOverlays;
-}
-
-function _hideLeadgenOverlays(){
-  if (!_leadgenOverlays) return;
-  _leadgenOverlays.container.style.display = 'none';
-}
-
-function _showLeadgenOverlays(){
-  const L = _ensureLeadgenOverlays();
-  L.container.style.display = 'block';
-}
-
-function _destroyLeadgenOverlays(){
-  if (!_leadgenOverlays) return;
-  try { _leadgenOverlays.container.remove(); } catch(e){}
-  _leadgenOverlays = null;
-}
-
-function _ensureOverlayInputs(){
-  const L = _ensureLeadgenOverlays();
-  const F = (CFG && CFG.LEADGEN && CFG.LEADGEN.fields) ? CFG.LEADGEN.fields : [];
-  while (L.inputs.length < F.length){
-    const i = L.inputs.length;
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.inputMode = 'text';
-    inp.autocomplete = 'on';
-    inp.spellcheck = false;
-    // Debe ser visible y dentro del viewport (no display:none) para que iOS abra teclado.
-    Object.assign(inp.style, {
-      position: 'fixed',
-      left: '0px',
-      top: '0px',
-      width: '60px',
-      height: '32px',
-      opacity: '0.02',             // casi invisible, pero no 0
-      background: 'transparent',
-      color: 'transparent',         // caret queda, texto no molesta
-      caretColor: 'auto',
-      border: 'none',
-      outline: 'none',
-      fontSize: '16px',             // evita zoom en iOS
-      zIndex: '10000',
-      pointerEvents: 'auto',        // debe captar el tap
-      touchAction: 'auto'
-    });
-    inp.addEventListener('focus', ()=>{
-      // Al enfocar, desactivar guards y sincronizar idx
-      _setGuardsEnabled(false);
-      if (typeof leadgen !== 'undefined'){
-        leadgen.idx = i;
-        const key = CFG.LEADGEN.fields[i].key;
-        _ghostFieldKey = key;
-        inp.value = (leadgen.data && leadgen.data[key]) || '';
-      }
-    });
-    inp.addEventListener('input', ()=>{
-      if (typeof leadgen !== 'undefined' && CFG && CFG.LEADGEN){
-        const key = CFG.LEADGEN.fields[i].key;
-        leadgen.data[key] = inp.value;
-        if (leadgen.errors) leadgen.errors[key] = false;
-        leadgen.message = '';
-      }
-    });
-    inp.addEventListener('keydown', (ev)=>{
-      if (ev.key === 'Enter'){
-        ev.preventDefault();
-        try { leadgenSubmit(); } catch(e){}
-      }
-    });
-    L.container.appendChild(inp);
-    L.inputs.push(inp);
-  }
-  return L.inputs;
-}
-
-function _updateLeadgenOverlays(){
-  if (typeof GAME === 'undefined' || gameState !== GAME.LEADGEN) { _hideLeadgenOverlays(); return; }
-  if (!leadgen || !leadgen._inputRects) return;
-  const inputs = _ensureOverlayInputs();
-  _showLeadgenOverlays();
-  const v = (typeof getViewport === 'function') ? getViewport() : {x:0,y:0,s:1};
-  for (let i=0;i<inputs.length;i++){
-    const r = leadgen._inputRects[i];
-    if (!r) continue;
-    const x = Math.round(v.x + r.x * v.s);
-    const y = Math.round(v.y + r.y * v.s);
-    const w = Math.max(40, Math.round(r.w * v.s));
-    const h = Math.max(28, Math.round(r.h * v.s));
-    const inp = inputs[i];
-    inp.style.left = x + 'px';
-    inp.style.top  = y + 'px';
-    inp.style.width  = w + 'px';
-    inp.style.height = Math.max(32, h) + 'px';
-    // Configurar tipo sugerido
-    const key = CFG.LEADGEN.fields[i].key;
-    if (key === 'email') { inp.type = 'email'; inp.inputMode = 'email'; inp.autocomplete = 'email'; }
-    else { inp.type = 'text'; inp.inputMode = 'text'; inp.autocomplete = (key==='first'||key==='last')?'name':'on'; }
-  }
-}
-
-function _focusLeadgenFieldByIndex(i){
-  // Foco REAL sobre overlay input para abrir teclado
-  const inputs = _ensureOverlayInputs();
-  if (i<0 || i>=inputs.length) return;
-  _showLeadgenOverlays();
-  try { inputs[i].focus({ preventScroll: true }); } catch(e) { inputs[i].focus(); }
-  try { inputs[i].click(); } catch(e) {}
-  try { const L = inputs[i].value.length; inputs[i].setSelectionRange(L, L); } catch(e){}
-}
-
-function _blurLeadgen(){
-  if (_leadgenOverlays && _leadgenOverlays.inputs){
-    _leadgenOverlays.inputs.forEach(inp=>inp.blur());
-  }
-  _setGuardsEnabled(true);
-}
-// ====== END MOBILE LEADGEN: overlay inputs ======
-
 // ---------- Leadgen ----------
 let leadgen = {
   active:false,           // ⬅️ importante: comienza apagado (no bloquea el menú)
@@ -697,13 +558,7 @@ async function _mobileOnFirstUserGesture() {
 }
 
 // Llamado temprano en setup()
-function _mobileInit()
-{
-  // [MOBILE] no bloquear gestos en LEADGEN
-  const _origPrevent = (ev)=>{};
-}
-
-function _mobileInit_old {
+function _mobileInit() {
   _mobileInstallScrollGuards();
 
   // Redundancia: algunos navegadores no disparan correctamente ciertos eventos;
@@ -779,11 +634,8 @@ function draw(){
 }
 
 // ---------- Render ----------
-// [CLEAN] render duplicada
-function render__dup_removed_1(){
-  
-  _leadgenOverlayTickHook();
-if (gameState === GAME.MENU){ renderMenu(); return; }
+function render(){
+  if (gameState === GAME.MENU){ renderMenu(); return; }
 
   // [MOBILE] — cuando el dispositivo está en vertical mostramos overlay pidiendo rotar
   if (windowHeight > windowWidth){
@@ -924,8 +776,7 @@ function recordInputSample(now){
 
 // ---------- Setup ----------
 let BILL_REST=null, BILL_RISE=null, BILL_THROW=null;
-// [CLEAN] setup duplicada
-function setup__dup_removed_1(){
+function setup(){
   createCanvas(windowWidth, windowHeight);
   imageMode(CORNER);
 
@@ -1954,26 +1805,156 @@ function cropTransparent(src, alphaThreshold=1){
 }
 
 
-// Actualizar overlays periódicamente mientras estamos en LEADGEN
-let _leadgenOverlayTimer = null;
-function _leadgenOverlayStart(){
-  if (_leadgenOverlayTimer) return;
-  _leadgenOverlayTimer = setInterval(_updateLeadgenOverlays, 100); // 10fps
-}
-function _leadgenOverlayStop(){
-  if (_leadgenOverlayTimer){ clearInterval(_leadgenOverlayTimer); _leadgenOverlayTimer = null; }
-  _hideLeadgenOverlays();
-}
+/* ==== MOBILE KEYBOARD PATCH (non-destructivo) ==== */
+(function(){
+  if (typeof window === 'undefined') return;
 
+  let _overlayInput = null;
+  let _overlayDiv = null;
 
-let _prevGameState = null;
-function _leadgenOverlayTickHook(){
-  if (_prevGameState !== gameState){
-    if (typeof GAME !== 'undefined' && gameState === GAME.LEADGEN){ _leadgenOverlayStart(); }
-    else { _leadgenOverlayStop(); }
-    _prevGameState = gameState;
+  function _ensureOverlay(){
+    if (_overlayInput && _overlayDiv) return _overlayInput;
+    _overlayDiv = document.getElementById('leadgen-overlay-container');
+    if (!_overlayDiv){
+      _overlayDiv = document.createElement('div');
+      _overlayDiv.id = 'leadgen-overlay-container';
+      Object.assign(_overlayDiv.style, {
+        position: 'fixed',
+        left: '0px',
+        top: '0px',
+        width: '100vw',
+        height: '100vh',
+        zIndex: '9999',
+        pointerEvents: 'none',
+      });
+      document.body.appendChild(_overlayDiv);
+    }
+    _overlayInput = document.getElementById('leadgen-overlay-input');
+    if (!_overlayInput){
+      _overlayInput = document.createElement('input');
+      _overlayInput.id = 'leadgen-overlay-input';
+      _overlayInput.type = 'text';
+      _overlayInput.inputMode = 'text';
+      _overlayInput.autocomplete = 'on';
+      _overlayInput.spellcheck = false;
+      Object.assign(_overlayInput.style, {
+        position: 'fixed',
+        left: '0px',
+        top: '0px',
+        width: '80px',
+        height: '34px',
+        opacity: '0.02',        // visible para el navegador, invisible para el ojo
+        background: 'transparent',
+        color: 'transparent',
+        caretColor: 'auto',
+        border: 'none',
+        outline: 'none',
+        fontSize: '16px',        // evita zoom en iOS
+        zIndex: '10000',
+        pointerEvents: 'auto',   // debe recibir el tap
+        touchAction: 'auto',
+        display: 'none',
+      });
+      _overlayDiv.appendChild(_overlayInput);
+
+      _overlayInput.addEventListener('input', function(){
+        try{
+          if (!window.CFG || !window.CFG.LEADGEN || !window.leadgen) return;
+          const key = window.CFG.LEADGEN.fields[window.leadgen.idx]?.key;
+          if (!key) return;
+          window.leadgen.data[key] = _overlayInput.value;
+          if (window.leadgen.errors) window.leadgen.errors[key] = false;
+          window.leadgen.message = '';
+        }catch(e){}
+      });
+      _overlayInput.addEventListener('keydown', function(ev){
+        if (ev.key === 'Enter'){
+          ev.preventDefault();
+          try{ window.leadgenSubmit && window.leadgenSubmit(); }catch(e){}
+        }
+      });
+    }
+    return _overlayInput;
   }
-  if (typeof GAME !== 'undefined' && gameState === GAME.LEADGEN){
-    _updateLeadgenOverlays();
+
+  function _positionOverlayForIndex(i){
+    try{
+      if (!window.CFG || !window.CFG.LEADGEN || !window.leadgen || !window.leadgen._inputRects) return false;
+      const rect = window.leadgen._inputRects[i];
+      if (!rect) return false;
+      const v = (typeof window.getViewport === 'function') ? window.getViewport() : {x:0,y:0,s:1};
+      const x = Math.round(v.x + rect.x * v.s);
+      const y = Math.round(v.y + rect.y * v.s);
+      const w = Math.max(48, Math.round(rect.w * v.s));
+      const h = Math.max(32, Math.round(rect.h * v.s));
+      const inp = _ensureOverlay();
+      inp.style.left = x + 'px';
+      inp.style.top  = y + 'px';
+      inp.style.width  = w + 'px';
+      inp.style.height = h + 'px';
+      // Tipo según campo
+      const key = window.CFG.LEADGEN.fields[i]?.key;
+      if (key === 'email'){ inp.type = 'email'; inp.inputMode = 'email'; inp.autocomplete = 'email'; }
+      else { inp.type = 'text'; inp.inputMode = 'text'; inp.autocomplete = (key==='first'||key==='last')?'name':'on'; }
+      // Valor actual
+      inp.value = (window.leadgen.data && key) ? (window.leadgen.data[key] || '') : '';
+      return true;
+    }catch(e){ return false; }
   }
-}
+
+  function _openKeyboardForIndex(i){
+    const ok = _positionOverlayForIndex(i);
+    const inp = _ensureOverlay();
+    if (!ok){ inp.style.display = 'none'; return; }
+    try{
+      inp.style.display = 'block';
+      // Desactivar guards si existen
+      if (window._setGuardsEnabled) window._setGuardsEnabled(false);
+      // Foco real y selección al final
+      try { inp.focus({ preventScroll: true }); } catch(e) { inp.focus(); }
+      try { inp.click(); } catch(e) {}
+      try { const L = inp.value.length; inp.setSelectionRange(L, L); } catch(e){}
+    }catch(e){}
+  }
+
+  function _closeKeyboard(){
+    const inp = _ensureOverlay();
+    try { inp.blur(); } catch(e){}
+    inp.style.display = 'none';
+    if (window._setGuardsEnabled) window._setGuardsEnabled(true);
+  }
+
+  // Monkey-patch no destructivo
+  const _origFocusIdx = window._focusLeadgenFieldByIndex;
+  if (typeof _origFocusIdx === 'function'){
+    window._focusLeadgenFieldByIndex = function(i){
+      try{ _origFocusIdx(i); }catch(e){}
+      _openKeyboardForIndex(i);
+    };
+  }
+
+  const _origSubmit = window.leadgenSubmit;
+  if (typeof _origSubmit === 'function'){
+    window.leadgenSubmit = function(){
+      let r;
+      try{ r = _origSubmit(); }catch(e){}
+      _closeKeyboard();
+      return r;
+    };
+  }
+
+  // Si el juego usa render()/draw() para pintar, sincronizamos posición del overlay
+  function _tick(){
+    try{
+      if (window.GAME && window.gameState === window.GAME.LEADGEN && typeof window.leadgen?.idx === 'number'){
+        _positionOverlayForIndex(window.leadgen.idx);
+      } else {
+        const inp = _ensureOverlay();
+        inp.style.display = 'none';
+      }
+    }catch(e){}
+    window.requestAnimationFrame(_tick);
+  }
+  window.requestAnimationFrame(_tick);
+})();
+/* ==== END MOBILE KEYBOARD PATCH ==== */
