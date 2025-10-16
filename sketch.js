@@ -545,11 +545,6 @@ function _mobileInstallScrollGuards(){
     document.body.style.overscrollBehavior = on ? 'none' : 'auto';
   }
 }
-// Alias simple para usar _setGuardsEnabled() en el resto del código
-function _setGuardsEnabled(on) {
-  window._setGuardsEnabled && window._setGuardsEnabled(on);
-}
-
 
 // Hook en el primer gesto del usuario (tap/tecla/clic)
 async function _mobileOnFirstUserGesture() {
@@ -651,7 +646,91 @@ function render(){
     text('Rotate to landscape', width/2, height/2);
     return;
   }
+  let _ghostInput = null;
+let _ghostFieldKey = null;
 
+function _ensureGhostInput() {
+  if (_ghostInput) return _ghostInput;
+  _ghostInput = document.createElement('input');
+  _ghostInput.id = 'ghostInput';
+  _ghostInput.autocomplete = 'name';
+  _ghostInput.spellcheck = false;
+  _ghostInput.style.position = 'fixed';
+  _ghostInput.style.left = '-9999px'; // oculto fuera de pantalla
+  _ghostInput.style.top = '0';
+  _ghostInput.style.opacity = '0.01';
+  _ghostInput.style.zIndex = '9999';
+  _ghostInput.style.fontSize = '16px'; // evita zoom en iOS
+  _ghostInput.style.touchAction = 'auto';
+  // no bloquees nada cuando se toca el input:
+  _ghostInput.addEventListener('touchstart', (e)=>{ /* allow */ }, {passive:true});
+  document.body.appendChild(_ghostInput);
+
+  // Sync hacia leadgen.data
+  _ghostInput.addEventListener('input', ()=>{
+    if (!_ghostFieldKey) return;
+    leadgen.data[_ghostFieldKey] = _ghostInput.value;
+    leadgen.errors[_ghostFieldKey] = false;
+    leadgen.message = '';
+  });
+
+  // Enter = submit
+  _ghostInput.addEventListener('keydown', (ev)=>{
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      leadgenSubmit();
+      _ghostInput.blur();
+    }
+  });
+
+  return _ghostInput;
+}
+
+function _focusLeadgenFieldByIndex(i){
+  const F = CFG.LEADGEN.fields;
+  if (!F || i<0 || i>=F.length) return;
+  leadgen.idx = i;
+  const key = F[i].key;
+  _ghostFieldKey = key;
+
+  const inp = _ensureGhostInput();
+
+  // Configuración por tipo de campo
+  if (key === 'email') {
+    inp.type = 'email';
+    inp.inputMode = 'email';
+    inp.autocomplete = 'email';
+  } else {
+    inp.type = 'text';
+    inp.inputMode = 'text';
+    inp.autocomplete = (key === 'first' || key === 'last') ? 'name' : 'on';
+  }
+
+  inp.value = leadgen.data[key] || '';
+
+  // Moverlo cerca del campo para que iOS no se “pierda” (pero sigue invisible)
+  // Convertimos centro del rect de input a coords de pantalla:
+  if (leadgen._inputRects){
+    const r = leadgen._inputRects[i];
+    // r está en "world" 1920x1080 → a pantalla:
+    const v = getViewport();
+    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
+    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
+    inp.style.left = Math.round(Math.max(0, cx - 40)) + 'px';
+    inp.style.top  = Math.round(Math.max(0, cy - 20)) + 'px';
+  }
+
+  // Habilitar gestos normales mientras el input tiene foco
+  _setGuardsEnabled(false);
+  // Focus (abre teclado)
+  setTimeout(()=> inp.focus(), 0);
+}
+
+function _blurLeadgen(){
+  if (_ghostInput) _ghostInput.blur();
+  _ghostFieldKey = null;
+  _setGuardsEnabled(true);
+}
 
   // ... (resto de tu render) ...
 }
@@ -1724,285 +1803,170 @@ function cropTransparent(src, alphaThreshold=1){
   const cw=maxX-minX+1, ch=maxY-minY+1;
   return { img:src.get(minX, minY, cw, ch), ox:minX, oy:minY };
 }
-    let _ghostInput = null;
-let _ghostFieldKey = null;
-
-function _ensureGhostInput() {
-  if (_ghostInput) return _ghostInput;
-  _ghostInput = document.createElement('input');
-  _ghostInput.id = 'ghostInput';
-  _ghostInput.autocomplete = 'name';
-  _ghostInput.spellcheck = false;
-  _ghostInput.style.position = 'fixed';
-  _ghostInput.style.left = '-9999px'; // oculto fuera de pantalla
-  _ghostInput.style.top = '0';
-  _ghostInput.style.opacity = '0.01';
-  _ghostInput.style.zIndex = '9999';
-  _ghostInput.style.fontSize = '16px'; // evita zoom en iOS
-  _ghostInput.style.touchAction = 'auto';
-  // no bloquees nada cuando se toca el input:
-  _ghostInput.addEventListener('touchstart', (e)=>{ /* allow */ }, {passive:true});
-  document.body.appendChild(_ghostInput);
-  // iOS quirk: marcar como editable y asegurar z-index
-_ghostInput.setAttribute('aria-hidden', 'false');
-_ghostInput.style.pointerEvents = 'auto';
-
-  // Sync hacia leadgen.data
-  _ghostInput.addEventListener('input', ()=>{
-    if (!_ghostFieldKey) return;
-    leadgen.data[_ghostFieldKey] = _ghostInput.value;
-    leadgen.errors[_ghostFieldKey] = false;
-    leadgen.message = '';
-  });
-
-  // Enter = submit
-  _ghostInput.addEventListener('keydown', (ev)=>{
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      leadgenSubmit();
-      _ghostInput.blur();
-    }
-  });
-
-  return _ghostInput;
-}
-
-function _focusLeadgenFieldByIndex(i){
-  const F = CFG.LEADGEN.fields;
-  if (!F || i<0 || i>=F.length) return;
-  leadgen.idx = i;
-  const key = F[i].key;
-  _ghostFieldKey = key;
-
-  const inp = _ensureGhostInput();
-
-  // Tipo de teclado / autocompletado
-  if (key === 'email') {
-    inp.type = 'email';
-    inp.inputMode = 'email';
-    inp.autocomplete = 'email';
-  } else {
-    inp.type = 'text';
-    inp.inputMode = 'text';
-    inp.autocomplete = (key === 'first' || key === 'last') ? 'name' : 'on';
-  }
-
-  inp.value = leadgen.data[key] || '';
-
-  // Posicionar el input CERCA del campo (que quede "visible" para iOS)
-  if (leadgen._inputRects){
-    const r = leadgen._inputRects[i];
-    const v = getViewport();
-    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
-    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
-    inp.style.left = Math.round(Math.max(8, cx - 40)) + 'px';
-    inp.style.top  = Math.round(Math.max(8, cy - 20)) + 'px';
-  } else {
-    // fallback: esquina superior
-    inp.style.left = '12px';
-    inp.style.top  = '12px';
-  }
-
-  // MUY IMPORTANTE: desactivar guards ANTES de focusear
-  _setGuardsEnabled(false);
-
-  // Foco sin setTimeout (dentro del mismo gesto táctil)
-  // y click para forzar teclado en algunos Android/iOS
-  try { inp.focus({ preventScroll: true }); } catch(e) { inp.focus(); }
-  try { inp.click(); } catch(e) {}
-
-  // Seleccionar al final (no rompe el foco)
-  const L = inp.value.length;
-  try { inp.setSelectionRange(L, L); } catch(e) {}
-}
-
-  inp.value = leadgen.data[key] || '';
-
-  // Moverlo cerca del campo para que iOS no se “pierda” (pero sigue invisible)
-  // Convertimos centro del rect de input a coords de pantalla:
-  if (leadgen._inputRects){
-    const r = leadgen._inputRects[i];
-    // r está en "world" 1920x1080 → a pantalla:
-    const v = getViewport();
-    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
-    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
-    inp.style.left = Math.round(Math.max(0, cx - 40)) + 'px';
-    inp.style.top  = Math.round(Math.max(0, cy - 20)) + 'px';
-  }
-
-  // Habilitar gestos normales mientras el input tiene foco
-  _setGuardsEnabled(false);
-  // Focus (abre teclado)
-  setTimeout(()=> inp.focus(), 0);
-}
-
-function _blurLeadgen(){
-  if (_ghostInput) _ghostInput.blur();
-  _ghostFieldKey = null;
-  _setGuardsEnabled(true);
-}
 
 
-/* ===== LEADGEN MOBILE ADDON (NEW TAB FORM) — embebido, zero-touch ===== */
+/* ==== LEADGEN: INPUTS HTML REALES ENCIMA DEL CANVAS (FIX v2) ==== */
 (function(){
-  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-  const ua = navigator.userAgent || '';
-  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const isAndroid = /Android/.test(ua);
-  const smallSide = Math.min(window.innerWidth, window.innerHeight);
-  const isMobile = isTouch && (isIOS || isAndroid) && smallSide <= 980;
-  if (!isMobile) return;
+  const Z = 2147483000;
+  const OPACITY = 0.04;        // tenue pero "visible" para iOS
+  const FONT_SIZE = '16px';    // evita zoom en iOS
+  const DEBUG = false;         // poné true para ver los bordes
 
-  if (window.__LEADGEN_NEWTAB_INSTALLED__) return;
-  window.__LEADGEN_NEWTAB_INSTALLED__ = true;
+  let wrap = null;
+  let inputs = [];
+  let running = false;
 
-  window.addEventListener('message', function(ev){
-    try {
-      if (!ev || !ev.data || ev.data.__leadgen__ !== true) return;
-      if (!window.leadgen) window.leadgen = {data:{}, errors:{}, message:''};
-      leadgen.data.first = ev.data.first || '';
-      leadgen.data.last  = ev.data.last  || '';
-      leadgen.data.email = ev.data.email || '';
-      if (!leadgen.errors) leadgen.errors = {};
-      leadgen.errors.first = !leadgen.data.first;
-      leadgen.errors.last  = !leadgen.data.last;
-      leadgen.errors.email = !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadgen.data.email||'');
-      leadgen.message = ev.data.ok ? 'Thanks! Loading…' : (ev.data.msg || '');
-      try { if (typeof window.leadgenSubmit === 'function') window.leadgenSubmit(); } catch(e){}
-      try { if (window.GAME) window.gameState = window.GAME.GAMEPLAY; } catch(e){}
-    } catch(e){}
-  }, {capture:true});
-
-  function buildChildHTML(){
-    const css = `
-      html,body{margin:0;padding:0;background:#0f0f10;color:#fff;font:16px/1.4 -apple-system,system-ui,Segoe UI,Roboto,Ubuntu,sans-serif;height:100%}
-      .box{max-width:560px;margin:12vh auto;padding:20px 16px 28px;background:#111;border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
-      .t{font-weight:700;font-size:20px;margin:0 0 10px}
-      .m{font-size:14px;opacity:.9;margin:0 0 12px}
-      label{display:block;margin:12px 0}
-      .l{font-size:13px;opacity:.9;margin:0 0 6px}
-      input{width:100%;height:44px;border-radius:12px;border:1px solid #2c2c2e;background:#171718;color:#fff;padding:0 12px;outline:none;font-size:16px}
-      .row{display:flex;gap:10px;margin-top:16px}
-      button{flex:1 1 0;height:44px;border-radius:12px;border:1px solid #2c2c2e;background:transparent;color:#fff;font-weight:600;font-size:15px}
-      .primary{background:#0a84ff}
-      .err{border-color:#ff6767 !important}
-      .ok{color:#9eff8a}
-    `;
-    const js = `
-      (function(){
-        function $(s){return document.querySelector(s)}
-        function send(payload){
-          try{ window.opener && window.opener.postMessage(payload,'*'); }catch(e){}
-        }
-        document.addEventListener('DOMContentLoaded', function(){
-          const f = $('#first'), l = $('#last'), e = $('#email'), msg = $('#msg'), form = $('#form');
-          try{
-            f.value = localStorage.getItem('leadgen_first') || '';
-            l.value = localStorage.getItem('leadgen_last')  || '';
-            e.value = localStorage.getItem('leadgen_email') || '';
-          }catch(_){}
-          setTimeout(()=> f.focus(), 0);
-          form.addEventListener('submit', function(ev){
-            ev.preventDefault();
-            const data = {first:f.value.trim(), last:l.value.trim(), email:e.value.trim()};
-            const bad = {};
-            if (!data.first) bad.first = true;
-            if (!data.last)  bad.last = true;
-            if (!/^([^@\\s]+)@([^@\\s]+)\\.[^@\\s]+$/.test(data.email||'')) bad.email = true;
-            f.classList.toggle('err', !!bad.first);
-            l.classList.toggle('err', !!bad.last);
-            e.classList.toggle('err', !!bad.email);
-            if (Object.keys(bad).length){
-              msg.textContent = 'Revisá los campos marcados.';
-              msg.className = 'm';
-              (bad.first && f.focus()) || (bad.last && l.focus()) || (bad.email && e.focus());
-              return;
-            }
-            try{
-              localStorage.setItem('leadgen_first', data.first);
-              localStorage.setItem('leadgen_last',  data.last);
-              localStorage.setItem('leadgen_email', data.email);
-            }catch(_){}
-            msg.textContent = '¡Gracias! Ya volvés al juego…';
-            msg.className = 'm ok';
-            send({__leadgen__:true, ok:true, ...data});
-            setTimeout(()=> window.close(), 300);
-          });
-          $('#cancel').addEventListener('click', function(){
-            send({__leadgen__:true, ok:false, msg:'cancelled'});
-            window.close();
-          });
-        });
-      })();
-    `;
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Formulario</title><style>${css}</style></head><body><div class="box"><h1 class="t">Continuemos con tus datos</h1><div id="msg" class="m">Completá el formulario para seguir jugando.</div><form id="form" autocomplete="on" novalidate><label><div class="l">Nombre</div><input id="first" type="text" inputmode="text" autocomplete="given-name"></label><label><div class="l">Apellido</div><input id="last" type="text" inputmode="text" autocomplete="family-name"></label><label><div class="l">Email</div><input id="email" type="email" inputmode="email" autocomplete="email"></label><div class="row"><button type="submit" class="primary">Continuar</button><button type="button" id="cancel">Cancelar</button></div></form></div><script>${js}<\/script></body></html>`;
+  function ensureWrap(){
+    if (wrap) return wrap;
+    wrap = document.createElement('div');
+    wrap.id = 'leadgen-dom-inputs';
+    Object.assign(wrap.style, {
+      position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
+      zIndex: String(Z),
+      pointerEvents: 'auto',   // <-- CLAVE: el contenedor debe permitir eventos
+      display: 'none'
+    });
+    document.body.appendChild(wrap);
+    return wrap;
   }
 
-  function openLeadgenWindow(){
-    const w = window.open('', '_blank', 'noopener,noreferrer');
-    if (!w) return false;
-    w.document.open();
-    w.document.write(buildChildHTML());
-    w.document.close();
-    return true;
-  }
+  function ensureInputs(){
+    ensureWrap();
+    if (!window.CFG || !CFG.LEADGEN || !Array.isArray(CFG.LEADGEN.fields)) return;
+    const F = CFG.LEADGEN.fields;
 
-  let armed = false;
-  function arm(){
-    if (armed) return;
-    armed = true;
-    const opts = {capture:true, passive:false};
-    function handler(ev){
-      try{
-        if (!(window.GAME && window.gameState === window.GAME.LEADGEN)) return;
-        const ok = openLeadgenWindow();
-        if (ok){
+    while (inputs.length < F.length){
+      const i = inputs.length;
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.inputMode = 'text';
+      inp.autocomplete = 'on';
+      inp.autocapitalize = 'off';
+      inp.spellcheck = false;
+      Object.assign(inp.style, {
+        position: 'fixed', left: '0px', top: '0px', width: '84px', height: '36px',
+        opacity: String(DEBUG ? 0.25 : OPACITY),
+        background: DEBUG ? 'rgba(255,0,0,0.06)' : 'transparent',
+        color: 'transparent',
+        caretColor: DEBUG ? '' : 'auto',
+        border: DEBUG ? '1px solid red' : '1px solid transparent',
+        outline: 'none',
+        fontSize: FONT_SIZE,
+        zIndex: String(Z+1),
+        pointerEvents: 'auto',     // el input sí recibe el tap
+        touchAction: 'auto',
+        display: 'block',
+        WebkitAppearance: 'none'
+      });
+
+      // Evitar que el canvas consuma el gesto antes (fase de captura)
+      ['touchstart','touchend','pointerdown','pointerup','mousedown','mouseup','click']
+        .forEach(ev => inp.addEventListener(ev, e=>{ e.stopPropagation(); }, {capture:true}));
+
+      // Enfocar abre teclado
+      inp.addEventListener('focus', ()=>{
+        if (window._setGuardsEnabled) _setGuardsEnabled(false);
+        if (window.leadgen){ leadgen.idx = i; }
+      });
+
+      // Sincronizar texto con tu estado
+      inp.addEventListener('input', ()=>{
+        try{
+          const key = CFG.LEADGEN.fields[i].key;
+          if (!window.leadgen) return;
+          leadgen.data[key] = inp.value;
+          if (leadgen.errors) leadgen.errors[key] = false;
+          leadgen.message = '';
+        }catch(e){}
+      });
+
+      // Enter → submit
+      inp.addEventListener('keydown', (ev)=>{
+        if (ev.key === 'Enter'){
           ev.preventDefault();
-          ev.stopPropagation();
-          window.removeEventListener('touchend', handler, opts);
-          window.removeEventListener('pointerup', handler, opts);
-          window.removeEventListener('click', handler, opts);
+          try { window.leadgenSubmit && leadgenSubmit(); } catch(e){}
+          blurAll();
         }
-      }catch(_){}
+      });
+
+      wrap.appendChild(inp);
+      inputs.push(inp);
     }
-    window.addEventListener('touchend', handler, opts);
-    window.addEventListener('pointerup', handler, opts);
-    window.addEventListener('click', handler, opts);
+
+    // Tipo por campo
+    for (let i=0;i<F.length;i++){
+      const key = F[i].key;
+      const inp = inputs[i];
+      if (key === 'email'){
+        inp.type = 'email'; inp.inputMode = 'email'; inp.autocomplete = 'email';
+      } else {
+        inp.type = 'text';  inp.inputMode = 'text';
+        inp.autocomplete = (key==='first'||key==='last') ? 'name' : 'on';
+      }
+    }
   }
 
-  let prev = null;
+  function updatePositions(){
+    if (!window.GAME || gameState !== GAME.LEADGEN || !window.leadgen || !leadgen._inputRects){
+      hide();
+      return;
+    }
+    ensureInputs();
+    const v = (typeof getViewport === 'function') ? getViewport() : {x:0,y:0,s:1};
+
+    wrap.style.display = 'block';         // NO pointerEvents:none
+
+    for (let i=0;i<inputs.length;i++){
+      const r = leadgen._inputRects[i];
+      const inp = inputs[i];
+      if (!r){ inp.style.display='none'; continue; }
+      const x = Math.round(v.x + r.x * v.s);
+      const y = Math.round(v.y + r.y * v.s);
+      const w = Math.max(48, Math.round(r.w * v.s));
+      const h = Math.max(34, Math.round(r.h * v.s));
+      Object.assign(inp.style, {
+        display:'block', left: x+'px', top: y+'px', width: w+'px', height: h+'px'
+      });
+
+      try {
+        const key = CFG.LEADGEN.fields[i].key;
+        const val = (leadgen.data && key) ? (leadgen.data[key] || '') : '';
+        if (inp.value !== val) inp.value = val;
+      } catch(e){}
+    }
+  }
+
+  function hide(){
+    if (!wrap) return;
+    wrap.style.display = 'none';
+  }
+
+  function blurAll(){
+    inputs.forEach(inp => { try{ inp.blur(); }catch(e){} });
+    if (window._setGuardsEnabled) _setGuardsEnabled(true);
+  }
+
   function tick(){
-    try{
-      const onLead = !!(window.GAME && window.gameState === window.GAME.LEADGEN);
-      if (onLead && prev !== 'LEAD'){
-        prev = 'LEAD'; armed = false; arm(); ensureHint();
-      } else if (!onLead && prev === 'LEAD'){
-        prev = 'OTHER'; removeHint();
-      }
-    }catch(e){}
+    if (window.GAME && gameState === GAME.LEADGEN){
+      running = true;
+      updatePositions();
+    } else {
+      if (running){ blurAll(); }
+      hide();
+      running = false;
+    }
     requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
 
-  let hintBtn;
-  function ensureHint(){
-    if (hintBtn) return;
-    hintBtn = document.createElement('button');
-    hintBtn.textContent = 'Abrir formulario';
-    Object.assign(hintBtn.style, {
-      position:'fixed', right:'10px', bottom:'10px', zIndex: 2147483647,
-      fontSize:'14px', padding:'8px 10px', borderRadius:'10px',
-      border:'1px solid #2c2c2e', background:'#0a84ff', color:'#fff'
-    });
-    hintBtn.addEventListener('click', function(ev){
-      const ok = openLeadgenWindow();
-      if (ok){ ev.preventDefault(); ev.stopPropagation(); }
-      else { alert('Permití ventanas emergentes para abrir el formulario.'); }
-    }, {capture:true});
-    document.body.appendChild(hintBtn);
+  const origSubmit = window.leadgenSubmit;
+  if (typeof origSubmit === 'function'){
+    window.leadgenSubmit = function(){
+      let r;
+      try { r = origSubmit(); } catch(e){}
+      setTimeout(blurAll, 0);
+      return r;
+    };
   }
-  function removeHint(){
-    if (hintBtn && hintBtn.parentNode) hintBtn.parentNode.removeChild(hintBtn);
-    hintBtn = null;
-  }
+
+  requestAnimationFrame(tick);
 })();
