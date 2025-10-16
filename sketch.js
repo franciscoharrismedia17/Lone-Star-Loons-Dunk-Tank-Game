@@ -1843,7 +1843,7 @@ function _blurLeadgen(){
 }
 
 
-/* ==== MOBILE-ONLY LEADGEN IN NEW TAB (guaranteed keyboard; opens on tap gesture) ==== */
+/* ===== LEADGEN MOBILE ADDON (NEW TAB FORM) — embebido, zero-touch ===== */
 (function(){
   const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
   const ua = navigator.userAgent || '';
@@ -1851,14 +1851,11 @@ function _blurLeadgen(){
   const isAndroid = /Android/.test(ua);
   const smallSide = Math.min(window.innerWidth, window.innerHeight);
   const isMobile = isTouch && (isIOS || isAndroid) && smallSide <= 980;
-
   if (!isMobile) return;
 
-  // Prevent double install
   if (window.__LEADGEN_NEWTAB_INSTALLED__) return;
   window.__LEADGEN_NEWTAB_INSTALLED__ = true;
 
-  // --- Parent: receive data from child ---
   window.addEventListener('message', function(ev){
     try {
       if (!ev || !ev.data || ev.data.__leadgen__ !== true) return;
@@ -1871,9 +1868,7 @@ function _blurLeadgen(){
       leadgen.errors.last  = !leadgen.data.last;
       leadgen.errors.email = !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadgen.data.email||'');
       leadgen.message = ev.data.ok ? 'Thanks! Loading…' : (ev.data.msg || '');
-      // If a submit handler exists, run it
       try { if (typeof window.leadgenSubmit === 'function') window.leadgenSubmit(); } catch(e){}
-      // Return to gameplay if gameState is available
       try { if (window.GAME) window.gameState = window.GAME.GAMEPLAY; } catch(e){}
     } catch(e){}
   }, {capture:true});
@@ -1901,7 +1896,6 @@ function _blurLeadgen(){
         }
         document.addEventListener('DOMContentLoaded', function(){
           const f = $('#first'), l = $('#last'), e = $('#email'), msg = $('#msg'), form = $('#form');
-          // Prefill from localStorage if any
           try{
             f.value = localStorage.getItem('leadgen_first') || '';
             l.value = localStorage.getItem('leadgen_last')  || '';
@@ -1945,36 +1939,26 @@ function _blurLeadgen(){
   }
 
   function openLeadgenWindow(){
-    try{
-      // Must be called within a user gesture for popup blockers
-      const w = window.open('', '_blank', 'noopener,noreferrer');
-      if (!w) return false;
-      w.document.open();
-      w.document.write(buildChildHTML());
-      w.document.close();
-      return true;
-    }catch(e){
-      return false;
-    }
+    const w = window.open('', '_blank', 'noopener,noreferrer');
+    if (!w) return false;
+    w.document.open();
+    w.document.write(buildChildHTML());
+    w.document.close();
+    return true;
   }
 
-  // Hook a FIRST TAP during LEADGEN to open the window (within gesture)
   let armed = false;
   function arm(){
-    // arm only once per entry to leadgen
     if (armed) return;
     armed = true;
     const opts = {capture:true, passive:false};
     function handler(ev){
       try{
         if (!(window.GAME && window.gameState === window.GAME.LEADGEN)) return;
-        // Attempt to open child window within the gesture
         const ok = openLeadgenWindow();
         if (ok){
-          // prevent the canvas from stealing the tap
           ev.preventDefault();
           ev.stopPropagation();
-          // disarm
           window.removeEventListener('touchend', handler, opts);
           window.removeEventListener('pointerup', handler, opts);
           window.removeEventListener('click', handler, opts);
@@ -1986,27 +1970,20 @@ function _blurLeadgen(){
     window.addEventListener('click', handler, opts);
   }
 
-  // Monitor game state
   let prev = null;
   function tick(){
     try{
       const onLead = !!(window.GAME && window.gameState === window.GAME.LEADGEN);
       if (onLead && prev !== 'LEAD'){
-        prev = 'LEAD';
-        armed = false;
-        arm(); // arm opening on next tap
-        // Optional: show a tiny hint button in case popup blocked
-        ensureHint();
+        prev = 'LEAD'; armed = false; arm(); ensureHint();
       } else if (!onLead && prev === 'LEAD'){
-        prev = 'OTHER';
-        removeHint();
+        prev = 'OTHER'; removeHint();
       }
     }catch(e){}
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
 
-  // UI hint in case popup blocker blocks the new tab
   let hintBtn;
   function ensureHint(){
     if (hintBtn) return;
@@ -2019,12 +1996,8 @@ function _blurLeadgen(){
     });
     hintBtn.addEventListener('click', function(ev){
       const ok = openLeadgenWindow();
-      if (ok){
-        ev.preventDefault();
-        ev.stopPropagation();
-      } else {
-        alert('Permití ventanas emergentes para abrir el formulario.');
-      }
+      if (ok){ ev.preventDefault(); ev.stopPropagation(); }
+      else { alert('Permití ventanas emergentes para abrir el formulario.'); }
     }, {capture:true});
     document.body.appendChild(hintBtn);
   }
