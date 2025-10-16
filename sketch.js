@@ -8,24 +8,22 @@
 // ✅ SFX: BallThrow, SUCCESS, FAIL, ALMOST, SPLASH, Button (con antispam).
 // ✅ Triggers insertados en puntos pedidos (comentados con // AUDIO: ...).
 
-/* IMPORTANTE (HTML): asegurate de cargar p5.sound
-<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
-*/
+
+
 
 // ============= AUDIO CONFIG (Editar aquí para ajustar volúmenes globalmente) =============
 const AUDIO = {
   master: 0.9,   // multiplicador global
-  music:  0.7,   // música (MAINMUSIC, LEVELCOMPLETE)
+  music:  0.5,   // música (MAINMUSIC, LEVELCOMPLETE)
   sfx:    0.9,   // efectos (throw, wind, hits, botones)
   per: {         // overrides por clip (opcional)
     BallThrow: 1.0,
     Wind: 0.5,
-    MAINMUSIC: 0.8,
+    MAINMUSIC: 0.5,
     LEVELCOMPLETE: 1.0,
-    FAIL: 0.9,
-    ALMOST: 0.9,
-    SPLASH: 1.0,
+    FAIL: 0.6,
+    ALMOST: 0.5,
+    SPLASH: 0.8,
     Button: 0.8,
     SUCCESS: 1.0
   },
@@ -211,8 +209,12 @@ const CFG = {
   },
 
   // --- POTENCIA MÍNIMA PARA ACERTAR ---
-  IMPACT: { byLevel:[68,71,72], fixed:null },
-
+ IMPACT: {
+  autoFromMax: true,
+  byLevelPct: [0.90, 1.0, 1.005], // porcentaje del máximo por nivel
+  byLevel: [68,71,72],            // fallback
+  fixed: null
+},
   // --- TIMER ---
   TIMER: {
     x:700, y:22, scale:0.60, textOffsetX:20, textOffsetY:-15,
@@ -326,8 +328,10 @@ let HAND_X = 0.72, HAND_Y = 0.08;
 const THROW_HOLD_MS = 120, THROW_COOLDOWN_MS = 160;
 let lastThrowAt = -9999, isHolding = false, throwEndAt = 0;
 const GESTURE_WINDOW_MS = 140;
-const GESTURE_VPS_MIN = 300, GESTURE_VPS_MAX = 2600;
-const THROW_SPEED_MIN = 18, THROW_SPEED_MAX = 72;
+const GESTURE_VPS_MIN = 800, GESTURE_VPS_MAX = 9000;
+const THROW_SPEED_MIN = 8, THROW_SPEED_MAX = 71;
+const THROW_GAIN  = 0.40;   // 1.0 normal, <1 más difícil
+const THROW_CURVE = 1.55;   // 1.0 lineal, >1 más difícil llegar al máximo
 let _inputHist = [], _lastThrowSpeed = 34;
 
 // ---------- Game State ----------
@@ -339,7 +343,7 @@ let currentLevelIndex = 0;
 let lastCompletedLevel = -1;
 
 // ---------- Sistema de aciertos por nivel ----------
-const HITS_REQUIRED_BY_LEVEL = [3, 2, 1]; // L1→3, L2→2, L3→1
+const HITS_REQUIRED_BY_LEVEL = [3, 3, 3]; // L1→3, L2→2, L3→1
 let hitsThisLevel = 0;
 function getRequiredHits(){ return HITS_REQUIRED_BY_LEVEL[currentLevelIndex] || 1; }
 
@@ -548,8 +552,14 @@ let impactThreshold = 50;
 function applyLevelConfig(idx){
   const L = LEVELS[idx];
   LEVEL_TIME_MS = Math.max(5, L.durationSec) * 1000;
-  impactThreshold = (CFG.IMPACT.fixed != null) ? CFG.IMPACT.fixed : (CFG.IMPACT.byLevel[idx] ?? 50);
-  GRAVITY = 0.50;
+if (CFG.IMPACT.fixed != null) {
+  impactThreshold = CFG.IMPACT.fixed;
+} else if (CFG.IMPACT.autoFromMax && Array.isArray(CFG.IMPACT.byLevelPct)) {
+  const pct = CFG.IMPACT.byLevelPct[idx] ?? 0.85;
+  impactThreshold = Math.round(THROW_SPEED_MAX * pct);
+} else {
+  impactThreshold = CFG.IMPACT.byLevel[idx] ?? 50;
+}  GRAVITY = 0.50;
 
   CFG.WIND.power = L.windPower;
   CFG.WIND.bias  = L.windBias;
