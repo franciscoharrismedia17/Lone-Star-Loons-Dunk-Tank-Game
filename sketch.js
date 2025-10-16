@@ -1972,7 +1972,26 @@ function cropTransparent(src, alphaThreshold=1){
 })();
 
 
-/* === Mobile LeadGen Overlay (HTML-based, zero assets) — SAFE INJECTION === */
+// ======== MOBILE RUNTIME GATE (Leadgen OFF on phones) ========
+(function(){
+  try {
+    const ua = navigator.userAgent || "";
+    const touch = (navigator.maxTouchPoints || 0) > 1;
+    const isIPhone = /iPhone|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+    const isIPad = /iPad/i.test(ua) || (touch && /Macintosh/.test(ua)); // iPadOS reports Mac
+    const IS_MOBILE_DEVICE = isIPhone || isAndroid || isIPad;
+
+    if (IS_MOBILE_DEVICE && CFG && CFG.LEADGEN) {
+      CFG.LEADGEN.enabled = false;
+      CFG.LEADGEN.showOnStart = false;
+    }
+  } catch (e) { /* noop */ }
+})();
+// ======== END MOBILE RUNTIME GATE ========
+
+
+/* === NEW MOBILE START OVERLAY (standalone, bypass old leadgen) === */
 (function(){
   const UA = navigator.userAgent||"";
   const touch = (navigator.maxTouchPoints||0) > 0;
@@ -1981,171 +2000,139 @@ function cropTransparent(src, alphaThreshold=1){
   const isIPad = /iPad/i.test(UA) || (touch && /Macintosh/.test(UA));
   const IS_MOBILE = isIPhone || isAndroid || isIPad;
 
-  // Config
-  const TITLE = "fill out form to begin";
-  const STORAGE_KEY = "leadgenData";
-  let overlay, panel, inputFirst, inputLast, inputEmail, btnSubmit, btnClose;
-  let leadgenDone = false;
-  let armed = false;
-
-  // Style (scoped)
-  const style = document.createElement("style");
-  style.textContent = `
-  .mlg-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.75); display:none; z-index:2147483000;
-                 align-items:center; justify-content:center; -webkit-backdrop-filter:saturate(120%) blur(2px); backdrop-filter:saturate(120%) blur(2px); }
-  .mlg-panel{ width:min(520px,92vw); background:#1e1e1e; color:#fff; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.4);
-              padding:18px; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  .mlg-title{ margin:4px 0 12px; font-size:18px; text-align:center; font-weight:600; }
-  .mlg-row{ margin:12px 0; }
-  .mlg-label{ display:block; font-size:12px; color:#bdbdbd; margin:0 2px 6px; }
-  .mlg-input{ width:100%; box-sizing:border-box; font-size:16px; padding:12px 14px; border-radius:10px; border:2px solid #4a4a4a; background:#171717; color:#fff; }
-  .mlg-input:focus{ outline:none; border-color:#7ec0ff; background:#121212; }
-  .mlg-actions{ display:flex; gap:12px; justify-content:flex-end; align-items:center; margin-top:14px; }
-  .mlg-btn{ appearance:none; border:0; border-radius:10px; padding:12px 18px; font-size:16px; font-weight:600; }
-  .mlg-submit{ background:#2e8b57; color:#fff; opacity:.6; }
-  .mlg-submit.enabled{ opacity:1; }
-  .mlg-close{ background:#3a3a3a; color:#fff; }
-  .mlg-hint{ font-size:12px; color:#bdbdbd; margin-top:8px; text-align:left; }
-  @media (pointer:coarse){ .mlg-input{ font-size:17px; } }`;
-
-  function emailOK(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v||""); }
-  function valid(){ return (inputFirst.value.trim().length>0 && inputLast.value.trim().length>0 && emailOK(inputEmail.value.trim())); }
-
-  function updateSubmit(){
-    if(valid()) btnSubmit.classList.add("enabled");
-    else btnSubmit.classList.remove("enabled");
+  // On mobile: hard-disable any previous in-game leadgen flags if they exist.
+  function disableOldLeadgen(){
+    try{
+      if (IS_MOBILE && window.CFG && window.CFG.LEADGEN){
+        window.CFG.LEADGEN.enabled = false;
+        window.CFG.LEADGEN.showOnStart = false;
+      }
+    }catch(e){}
   }
 
-  function buildOverlay(){
+  const STORAGE_KEY = "startOverlayData";
+  let overlay, panel, fFirst, fLast, fEmail, bSubmit, bCancel;
+  let armed = false, done = false;
+  let captured = { startLevel:null, startGame:null, beginGame:null };
+
+  const style = document.createElement("style");
+  style.textContent = `
+  .start-ovl{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;z-index:2147483000;
+    align-items:center;justify-content:center;-webkit-backdrop-filter:saturate(120%) blur(2px);backdrop-filter:saturate(120%) blur(2px);}
+  .start-pan{width:min(520px,92vw);background:#1e1e1e;color:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.4);
+    padding:18px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  .start-ttl{margin:4px 0 12px;font-size:18px;text-align:center;font-weight:600}
+  .row{margin:12px 0}.lbl{display:block;font-size:12px;color:#bdbdbd;margin:0 2px 6px}
+  .inp{width:100%;box-sizing:border-box;font-size:16px;padding:12px 14px;border-radius:10px;border:2px solid #4a4a4a;background:#171717;color:#fff}
+  .inp:focus{outline:none;border-color:#7ec0ff;background:#121212}
+  .acts{display:flex;gap:12px;justify-content:flex-end;align-items:center;margin-top:14px}
+  .btn{appearance:none;border:0;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:600}
+  .ok{background:#2e8b57;color:#fff;opacity:.6}.ok.enabled{opacity:1}
+  .cx{background:#3a3a3a;color:#fff}
+  .hint{font-size:12px;color:#bdbdbd;margin-top:8px;text-align:left}
+  @media (pointer:coarse){.inp{font-size:17px}}`;
+
+  function emailOK(v){ return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v||""); }
+  function valid(){ return fFirst.value.trim() && fLast.value.trim() && emailOK(fEmail.value.trim()); }
+  function updateBtn(){ if(valid()) bSubmit.classList.add("enabled"); else bSubmit.classList.remove("enabled"); }
+
+  function build(){
     if(overlay) return;
     document.head.appendChild(style);
-    overlay = document.createElement("div"); overlay.className="mlg-overlay"; overlay.setAttribute("role","dialog"); overlay.setAttribute("aria-modal","true");
-    panel = document.createElement("div"); panel.className="mlg-panel";
+    overlay = document.createElement("div"); overlay.className="start-ovl"; overlay.setAttribute("role","dialog"); overlay.setAttribute("aria-modal","true");
+    panel = document.createElement("div"); panel.className="start-pan";
+    const ttl = document.createElement("div"); ttl.className="start-ttl"; ttl.textContent="fill out form to begin";
 
-    const title = document.createElement("div"); title.className="mlg-title"; title.textContent = TITLE;
+    const r1=document.createElement("div"); r1.className="row";
+    const l1=document.createElement("label"); l1.className="lbl"; l1.textContent="First Name";
+    fFirst=document.createElement("input"); fFirst.className="inp"; fFirst.placeholder="First Name"; fFirst.autocapitalize="words"; fFirst.inputMode="text";
+    fFirst.addEventListener("input", updateBtn);
 
-    const r1 = document.createElement("div"); r1.className="mlg-row";
-    const l1 = document.createElement("label"); l1.className="mlg-label"; l1.textContent="First Name";
-    inputFirst = document.createElement("input"); inputFirst.className="mlg-input"; inputFirst.placeholder="First Name"; inputFirst.inputMode="text"; inputFirst.autocapitalize="words";
-    inputFirst.addEventListener("input", updateSubmit);
+    const r2=document.createElement("div"); r2.className="row";
+    const l2=document.createElement("label"); l2.className="lbl"; l2.textContent="Last Name";
+    fLast=document.createElement("input"); fLast.className="inp"; fLast.placeholder="Last Name"; fLast.autocapitalize="words"; fLast.inputMode="text";
+    fLast.addEventListener("input", updateBtn);
 
-    const r2 = document.createElement("div"); r2.className="mlg-row";
-    const l2 = document.createElement("label"); l2.className="mlg-label"; l2.textContent="Last Name";
-    inputLast = document.createElement("input"); inputLast.className="mlg-input"; inputLast.placeholder="Last Name"; inputLast.inputMode="text"; inputLast.autocapitalize="words";
-    inputLast.addEventListener("input", updateSubmit);
+    const r3=document.createElement("div"); r3.className="row";
+    const l3=document.createElement("label"); l3.className="lbl"; l3.textContent="Email";
+    fEmail=document.createElement("input"); fEmail.className="inp"; fEmail.placeholder="Email"; fEmail.type="email"; fEmail.inputMode="email";
+    fEmail.addEventListener("input", updateBtn);
 
-    const r3 = document.createElement("div"); r3.className="mlg-row";
-    const l3 = document.createElement("label"); l3.className="mlg-label"; l3.textContent="Email";
-    inputEmail = document.createElement("input"); inputEmail.className="mlg-input"; inputEmail.placeholder="Email"; inputEmail.type="email"; inputEmail.inputMode="email";
-    inputEmail.addEventListener("input", updateSubmit);
+    const acts=document.createElement("div"); acts.className="acts";
+    const hint=document.createElement("div"); hint.className="hint"; hint.textContent="Complete all fields with a valid email";
+    bCancel=document.createElement("button"); bCancel.className="btn cx"; bCancel.type="button"; bCancel.textContent="Cancel";
+    bSubmit=document.createElement("button"); bSubmit.className="btn ok"; bSubmit.type="button"; bSubmit.textContent="Submit";
 
-    const actions = document.createElement("div"); actions.className="mlg-actions";
-    const hint = document.createElement("div"); hint.className="mlg-hint"; hint.textContent="Complete all fields with a valid email";
-    btnClose = document.createElement("button"); btnClose.className="mlg-btn mlg-close"; btnClose.type="button"; btnClose.textContent="Cancel";
-    btnSubmit = document.createElement("button"); btnSubmit.className="mlg-btn mlg-submit"; btnSubmit.type="button"; btnSubmit.textContent="Submit";
-
-    r1.appendChild(l1); r1.appendChild(inputFirst);
-    r2.appendChild(l2); r2.appendChild(inputLast);
-    r3.appendChild(l3); r3.appendChild(inputEmail);
-    actions.appendChild(hint); actions.appendChild(btnClose); actions.appendChild(btnSubmit);
-    panel.appendChild(title); panel.appendChild(r1); panel.appendChild(r2); panel.appendChild(r3); panel.appendChild(actions);
+    r1.appendChild(l1); r1.appendChild(fFirst);
+    r2.appendChild(l2); r2.appendChild(fLast);
+    r3.appendChild(l3); r3.appendChild(fEmail);
+    acts.appendChild(hint); acts.appendChild(bCancel); acts.appendChild(bSubmit);
+    panel.appendChild(ttl); panel.appendChild(r1); panel.appendChild(r2); panel.appendChild(r3); panel.appendChild(acts);
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
 
-    function prefill(){
-      try{ const o = JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");
-        if(o.first) inputFirst.value = o.first;
-        if(o.last)  inputLast.value  = o.last;
-        if(o.email) inputEmail.value = o.email;
-      }catch(e){}
-      updateSubmit();
-    }
+    // Prefill (optional)
+    try{ const o = JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");
+      if(o.first) fFirst.value=o.first; if(o.last) fLast.value=o.last; if(o.email) fEmail.value=o.email;
+    }catch(e){}
+    updateBtn();
 
     function show(){
-      prefill();
-      overlay.style.display = "flex";
-      // Focus first field (opens keyboard)
-      setTimeout(()=> inputFirst.focus(), 0);
-      // prevent body scroll while open
-      document.documentElement.style.overflow = "hidden";
-      document.body.style.overflow = "hidden";
+      overlay.style.display="flex";
+      setTimeout(()=> fFirst.focus(), 0);
+      document.documentElement.style.overflow="hidden"; document.body.style.overflow="hidden";
     }
     function hide(){
-      overlay.style.display = "none";
-      document.documentElement.style.overflow = "";
-      document.body.style.overflow = "";
+      overlay.style.display="none";
+      document.documentElement.style.overflow=""; document.body.style.overflow="";
     }
 
-    btnClose.addEventListener("click", ()=>{ hide(); });
-    btnSubmit.addEventListener("click", ()=>{
+    bCancel.addEventListener("click", hide);
+    bSubmit.addEventListener("click", ()=>{
       if(!valid()) return;
-      try{
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          first: inputFirst.value.trim(),
-          last:  inputLast.value.trim(),
-          email: inputEmail.value.trim(),
-          ts: Date.now()
-        }));
-      }catch(e){}
-      leadgenDone = true;
-      hide();
-      // Continue game
-      if(typeof __mlg_continue === "function") __mlg_continue();
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        first:fFirst.value.trim(), last:fLast.value.trim(), email:fEmail.value.trim(), ts:Date.now()
+      })); }catch(e){}
+      done = true; hide();
+      if(typeof window.__startOverlayContinue === "function"){ window.__startOverlayContinue(); }
     });
 
-    // Expose controls
-    window.__mlg_show = show;
-    window.__mlg_hide = hide;
+    window.__startOverlayShow = show;
+    window.__startOverlayHide = hide;
   }
 
-  // Wrapper logic: intercept starter functions WITHOUT renaming originals ahead of time.
-  let captured = { startLevel:null, startGame:null, beginGame:null };
-  let capturingTimer = null;
-
-  function captureIfExists(){
-    let found = false;
-    ["startLevel","startGame","beginGame"].forEach(name=>{
-      if(!captured[name] && typeof window[name] === "function"){
-        captured[name] = window[name];
-        // Replace with a gating function
-        window[name] = function(){
-          if(IS_MOBILE && !leadgenDone){
-            buildOverlay();
-            window.__mlg_continue = ()=>{ captured[name].apply(this, arguments); };
-            window.__mlg_show();
-            return;
-          }
-          return captured[name].apply(this, arguments);
-        };
-        found = true;
+  function gateStarter(name){
+    if(typeof window[name] !== "function" || captured[name]) return false;
+    const orig = window[name];
+    captured[name] = orig;
+    window[name] = function(){
+      if(IS_MOBILE && !done){
+        build(); disableOldLeadgen();
+        window.__startOverlayContinue = ()=> { try{ orig.apply(this, arguments); }catch(e){} };
+        window.__startOverlayShow();
+        return;
       }
-    });
-    return found;
+      return orig.apply(this, arguments);
+    };
+    return true;
   }
 
   function arm(){
-    if(armed) return;
+    if(armed || !IS_MOBILE) return;
     armed = true;
-    buildOverlay();
-    // Try immediately
-    captureIfExists();
-    // And keep trying for a short while in case the game defines starters later
+    build(); disableOldLeadgen();
+    // Try now and also for a while in case starters are defined later
+    const names = ["startLevel","startGame","beginGame"];
+    names.forEach(gateStarter);
     let tries = 0;
-    capturingTimer = setInterval(()=>{
-      if(captureIfExists() || (++tries > 200)){ // ~10s @50ms
-        clearInterval(capturingTimer);
-      }
+    const t = setInterval(()=>{
+      let any = false; names.forEach(n=> any = gateStarter(n) || any);
+      if(any || (++tries>200)) clearInterval(t); // ~10s
     }, 50);
   }
 
-  // Only arm on mobile. Desktop remains unchanged.
-  if(IS_MOBILE){
-    if(document.readyState === "loading"){
-      document.addEventListener("DOMContentLoaded", arm, {once:true});
-    }else{
-      arm();
-    }
-  }
+  if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", arm, {once:true}); }
+  else { arm(); }
 })();
-/* === END SAFE INJECTION === */
+/* === END NEW MOBILE START OVERLAY === */
 
