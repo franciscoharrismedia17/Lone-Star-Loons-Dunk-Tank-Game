@@ -629,7 +629,7 @@ function setup(){
 function windowResized(){ fitToScreenNow(); }
 
 // ---------- Draw loop ----------
-function draw(){
+function __orig_draw(){
   // ... (igual a tu versión; gestiona update(), render(), ensureWindLoopFromFlag(), etc.) ...
 }
 
@@ -736,7 +736,7 @@ function _blurLeadgen(){
 }
 
 // ---------- Input unificado (mouse/touch/teclado) ----------
-function keyPressed(){
+function __orig_keyPressed(){
   resumeAudioIfNeeded();
   _mobileOnFirstUserGesture(); // [MOBILE] también contamos teclas como primer gesto
 
@@ -750,7 +750,7 @@ function mousePressed(){
   // ... (tu lógica existente de menú/leadgen/overlay) ...
   if (gameState !== GAME.LEADGEN && !tutorial.active) beginHold();
 }
-function mouseReleased(){
+function __orig_mouseReleased(){
   resumeAudioIfNeeded();
 
   // ... (tu lógica existente) ...
@@ -889,7 +889,7 @@ if (CFG.IMPACT.fixed != null) {
   COLLISION_SHRINK = CFG.HITBOX.shrink;
 }
 
-function startLevel(){
+function __orig_startLevel(){
   applyLevelConfig(currentLevelIndex);
 
   // Tutorial por nivel
@@ -1268,7 +1268,7 @@ function touchStarted(){
   return false;
 }
 
-function touchEnded(){
+function __orig_touchEnded(){
   // START ya se confirma en touchstart; acá solo cerramos gesto de tiro
   if (gameState !== GAME.LEADGEN) endHold();
   return false;
@@ -1310,16 +1310,7 @@ function drawLeadgenOverlay(){
           BASE_W/2 - w/2, H.y - cropH/2, w, cropH);
   }
 
-  
-  // Title text (mobile-friendly)
-  push();
-  if (FONT_MAIN) textFont(FONT_MAIN);
-  textAlign(CENTER, CENTER);
-  fill(255);
-  textSize(42);
-  text('fill out form to begin', BASE_W/2, (CFG.LEADGEN.header && CFG.LEADGEN.header.y ? CFG.LEADGEN.header.y + 60 : BASE_H*0.18));
-  pop();
-// Campos
+  // Campos
   const P = CFG.LEADGEN.panel;
   const F = CFG.LEADGEN.fields;
   const I = CFG.LEADGEN.input;
@@ -1979,3 +1970,219 @@ function cropTransparent(src, alphaThreshold=1){
 
   requestAnimationFrame(tick);
 })();
+
+
+// ======== MOBILE RUNTIME GATE (Leadgen OFF on phones) ========
+(function(){
+  try {
+    const ua = navigator.userAgent || "";
+    const touch = (navigator.maxTouchPoints || 0) > 1;
+    const isIPhone = /iPhone|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+    const isIPad = /iPad/i.test(ua) || (touch && /Macintosh/.test(ua)); // iPadOS reports Mac
+    const IS_MOBILE_DEVICE = isIPhone || isAndroid || isIPad;
+
+    if (IS_MOBILE_DEVICE && CFG && CFG.LEADGEN) {
+      CFG.LEADGEN.enabled = false;
+      CFG.LEADGEN.showOnStart = false;
+    }
+  } catch (e) { /* noop */ }
+})();
+// ======== END MOBILE RUNTIME GATE ========
+
+
+/* ======== MOBILE LEADGEN OVERLAY (asset-free) — injected ======== */
+(function(){
+  const __OL = { active:false, done:false, cb:null, isMobile:false,
+    fields:[
+      {key:"first", label:"First Name", type:"text",  value:""},
+      {key:"last",  label:"Last Name",  type:"text",  value:""},
+      {key:"email", label:"Email",      type:"email", value:""}
+    ],
+    rects:[], focus:0, typing:false, ghost:null, vOffset:0
+  };
+
+  function detectMobile(){
+    const ua = navigator.userAgent||"";
+    const touch = (navigator.maxTouchPoints||0)>0;
+    const iPhone=/iPhone|iPod/i.test(ua);
+    const Android=/Android/i.test(ua);
+    const iPad=/iPad/i.test(ua)||(touch&&/Macintosh/.test(ua));
+    return iPhone||Android||iPad;
+  }
+  __OL.isMobile = detectMobile();
+
+  function vvChange(){
+    const vv = window.visualViewport;
+    if(!vv){ __OL.vOffset=0; return; }
+    const missing = window.innerHeight - vv.height;
+    __OL.vOffset = Math.max(0, missing*0.5);
+  }
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", vvChange);
+    window.visualViewport.addEventListener("scroll", vvChange);
+    vvChange();
+  }
+
+  // Create ghost input
+  const g = document.createElement("input");
+  g.setAttribute("autocapitalize","none");
+  g.setAttribute("autocomplete","off");
+  g.setAttribute("autocorrect","off");
+  g.setAttribute("spellcheck","false");
+  Object.assign(g.style, {
+    position:"fixed", opacity:"0.01", zIndex:"9999", border:"0",
+    background:"transparent", padding:"0", height:"1.2em",
+    fontSize:"16px", left:"-9999px", top:"-9999px", width:"10px"
+  });
+  g.addEventListener("input", e=>{
+    __OL.fields[__OL.focus].value = e.target.value;
+  });
+  g.addEventListener("focus", ()=>{ __OL.typing=true; });
+  g.addEventListener("blur",  ()=>{
+    __OL.typing=false; g.style.left="-9999px"; g.style.top="-9999px";
+  });
+  (document.body ? document.body : document.documentElement).appendChild(g);
+  __OL.ghost = g;
+
+  function emailOK(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+  function valid(){ return __OL.fields[0].value.trim() && __OL.fields[1].value.trim() && emailOK(__OL.fields[2].value.trim()); }
+
+  function focusField(i){
+    __OL.focus = Math.max(0, Math.min(__OL.fields.length-1, i));
+    const r = (__OL.rects[__OL.focus]||{x:innerWidth/2-80,y:innerHeight/2,w:160,h:44});
+    const rect = (window.canvas && window.canvas.getBoundingClientRect)? window.canvas.getBoundingClientRect() : {left:0,top:0};
+    g.type = (__OL.fields[__OL.focus].type==="email") ? "email" : "text";
+    g.value = __OL.fields[__OL.focus].value || "";
+    g.style.left = (rect.left + r.x + 10) + "px";
+    g.style.top  = (rect.top  + r.y +  8) + "px";
+    g.style.width= Math.max(80, r.w-20) + "px";
+    setTimeout(()=>{
+      try{ g.focus({preventScroll:false}); const L=g.value.length; g.setSelectionRange(L,L);}catch(e){}
+    },0);
+  }
+
+  function blurField(){ try{ g.blur(); }catch(e){} }
+
+  function drawOverlay(){
+    if(!__OL.active) return;
+    const W = (typeof width!=='undefined'&&width)||window.innerWidth, H = (typeof height!=='undefined'&&height)||window.innerHeight;
+    push();
+    noStroke(); fill(0,180); rect(0,0,W,H);
+    pop();
+
+    const panelW = Math.min(520, W*0.92), panelH = 340;
+    const px = (W - panelW)/2;
+    const pyBase = (H - panelH)/2 - __OL.vOffset;
+    const py = Math.max(16, pyBase);
+
+    push(); noStroke(); fill(30); rect(px,py,panelW,panelH,16); pop();
+    push(); fill(255); textAlign(CENTER,CENTER); textSize(20);
+    text("fill out form to begin", px+panelW/2, py+26); pop();
+
+    const pad = 18, startY = py+64, rowH = 60;
+    __OL.rects = [];
+    for(let i=0;i<__OL.fields.length;i++){
+      const rectH = 44;
+      const rectY = startY + i*rowH;
+      push(); textAlign(LEFT, BOTTOM); textSize(12); fill(180);
+      text(__OL.fields[i].label, px+pad, rectY-6); pop();
+
+      const isF = (__OL.focus===i) && __OL.typing;
+      push(); stroke(isF? color(120,190,255) : 80); strokeWeight(2); fill(isF?16:22);
+      rect(px+pad, rectY, panelW-pad*2, rectH, 10); pop();
+
+      push(); textAlign(LEFT, CENTER); textSize(16); fill(230);
+      const shown = __OL.fields[i].value || "";
+      text(shown, px+pad+10, rectY+rectH/2);
+      if(isF && (floor(millis()/500)%2===0)){
+        const caretX = textWidth(shown) + (px+pad+10);
+        stroke(220); line(caretX+2, rectY+10, caretX+2, rectY+rectH-10);
+      }
+      pop();
+
+      __OL.rects.push({x:px+pad, y:rectY, w:panelW-pad*2, h:rectH, index:i});
+    }
+
+    const submitW=150, submitH=48;
+    const submitX = px+panelW - pad - submitW;
+    const submitY = py+panelH - submitH - 14;
+    const ok = valid();
+
+    push(); noStroke(); fill(ok? color(60,160,90):70);
+    rect(submitX,submitY,submitW,submitH,10);
+    fill(255); textAlign(CENTER,CENTER); textSize(18);
+    text("Submit", submitX+submitW/2, submitY+submitH/2);
+    pop();
+
+    push(); textAlign(LEFT,CENTER); textSize(12); fill(ok?140:200);
+    text(ok ? "Ready!" : "Complete all fields with a valid email", px+pad, submitY+submitH/2);
+    pop();
+  }
+
+  function onPointerReleased(mx,my){
+    if(!__OL.active) return false;
+    for(const r of __OL.rects){
+      if(mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h){ focusField(r.index); return true; }
+    }
+    // submit
+    const W = (typeof width!=='undefined'&&width)||window.innerWidth, H = (typeof height!=='undefined'&&height)||window.innerHeight;
+    const panelW = Math.min(520, W*0.92), panelH = 340;
+    const px = (W - panelW)/2;
+    const pyBase = (H - panelH)/2 - __OL.vOffset;
+    const py = Math.max(16, pyBase);
+    const pad=18, submitW=150, submitH=48;
+    const submitX = px+panelW - pad - submitW;
+    const submitY = py+panelH - submitH - 14;
+    if(mx>=submitX && mx<=submitX+submitW && my>=submitY && my<=submitY+submitH){
+      if(valid()){
+        try{ localStorage.setItem("leadgenData", JSON.stringify({
+          first: __OL.fields[0].value.trim(),
+          last:  __OL.fields[1].value.trim(),
+          email: __OL.fields[2].value.trim(),
+          ts: Date.now()
+        })); }catch(e){}
+        __OL.active=false; __OL.done=true; try{ __OL.typing=false; __OL.ghost.blur(); }catch(e){}
+        const cb = __OL.cb; __OL.cb=null; if(cb) cb();
+      }
+      return true;
+    }
+    return true;
+  }
+
+  function keyHandler(kc){
+    if(!__OL.active) return false;
+    if(kc===9){ __OL.focus=(__OL.focus+1)%__OL.fields.length; focusField(__OL.focus); return true; }
+    if(kc===13){
+      if(__OL.focus<__OL.fields.length-1){ __OL.focus++; focusField(__OL.focus); }
+      else { onPointerReleased(1e9,1e9); }
+      return true;
+    }
+    return false;
+  }
+
+  // Public API
+  window.__overlay_openLeadgen = function(cb){
+    if(!__OL.isMobile){ cb&&cb(); return; }
+    if(__OL.done){ cb&&cb(); return; }
+    __OL.cb = cb || null; __OL.active=true; __OL.focus=0; setTimeout(()=>focusField(0),0);
+  };
+  window.__overlay_drawIfActive = function(){ try{ drawOverlay(); }catch(e){} };
+  window.__overlay_onMouseReleased = function(){ return onPointerReleased(mouseX, mouseY); };
+  window.__overlay_onTouchEnded   = function(){ return onPointerReleased(mouseX, mouseY); };
+  window.__overlay_onKeyPressed   = function(kc){ return keyHandler(kc); };
+  window.__overlay_shouldGate     = function(){ return __OL.isMobile && !__OL.done; };
+})();
+/* ======== END MOBILE LEADGEN OVERLAY ======== */
+
+
+// injected wrapper for draw
+(function(){ const __old=__orig_draw; draw=function(){ __old(); try{ __overlay_drawIfActive(); }catch(e){} }; })();
+
+(function(){ const __old=__orig_mouseReleased; mouseReleased=function(){ try{ if(__overlay_onMouseReleased()) return; }catch(e){} return __old(); }; })();
+
+(function(){ const __old=__orig_touchEnded; touchEnded=function(){ try{ if(__overlay_onTouchEnded()) return; }catch(e){} return __old(); }; })();
+
+(function(){ const __old=__orig_keyPressed; keyPressed=function(){ try{ if(__overlay_onKeyPressed()) return; }catch(e){} return __old(); }; })();
+
+(function(){ const __old=__orig_startLevel; startLevel=function(){ try{ if(__overlay_shouldGate()){ __overlay_openLeadgen(()=>__old.apply(this, arguments)); return; } }catch(e){} return __old.apply(this, arguments); }; })();
