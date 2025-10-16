@@ -1958,53 +1958,63 @@ function cropTransparent(src, alphaThreshold=1){
   window.requestAnimationFrame(_tick);
 })();
 /* ==== END MOBILE KEYBOARD PATCH ==== */
-/* ==== MOBILE TAP → OPEN KEYBOARD (final patch) ==== */
+/* ==== MOBILE TAP → OPEN KEYBOARD (iOS LANDSCAPE FIX) ==== */
 (function(){
-  // Poné en true para ver el overlay encima del campo
+  // Activa para ver el overlay: borde y mayor opacidad
   const DEBUG = false;
 
-  function openAtCurrentOrHit(ev){
+  function focusOverlayAt(i){
+    if (typeof window._focusLeadgenFieldByIndex === 'function') {
+      window._focusLeadgenFieldByIndex(i);
+    }
+  }
+
+  function hitTestAndFocus(ev){
     if (!window.GAME || window.gameState !== window.GAME.LEADGEN) return;
 
-    try{
-      let x, y;
-      if (ev.touches && ev.touches[0]) { x = ev.touches[0].clientX; y = ev.touches[0].clientY; }
-      else { x = ev.clientX; y = ev.clientY; }
+    let x, y;
+    if (ev.touches && ev.touches[0]) { x = ev.touches[0].clientX; y = ev.touches[0].clientY; }
+    else if (ev.changedTouches && ev.changedTouches[0]) { x = ev.changedTouches[0].clientX; y = ev.changedTouches[0].clientY; }
+    else { x = ev.clientX; y = ev.clientY; }
 
-      // Si tenemos rects, detectamos qué campo tocaste
-      if (window.leadgen && window.leadgen._inputRects && Array.isArray(window.leadgen._inputRects)){
+    let idx = (window.leadgen?.idx ?? 0);
+    try {
+      if (window.leadgen && Array.isArray(window.leadgen._inputRects)) {
         const v = (typeof window.getViewport === 'function') ? window.getViewport() : {x:0,y:0,s:1};
         for (let i = 0; i < window.leadgen._inputRects.length; i++){
-          const r = window.leadgen._inputRects[i];
-          if (!r) continue;
+          const r = window.leadgen._inputRects[i]; if (!r) continue;
           const rx = v.x + r.x * v.s;
           const ry = v.y + r.y * v.s;
           const rw = r.w * v.s;
           const rh = r.h * v.s;
-          if (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh){
-            window.leadgen.idx = i; // sincronizamos índice
-            if (typeof window._focusLeadgenFieldByIndex === 'function') {
-              window._focusLeadgenFieldByIndex(i); // ← abre teclado en el mismo gesto
-            }
-            break;
-          }
-        }
-      } else {
-        // Fallback: enfocamos el índice actual
-        if (typeof window._focusLeadgenFieldByIndex === 'function'){
-          window._focusLeadgenFieldByIndex(window.leadgen?.idx || 0);
+          if (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh){ idx = i; break; }
         }
       }
     } catch(e){}
+
+    // Sincronizá el índice y enfocá dentro del MISMO gesto
+    if (window.leadgen) window.leadgen.idx = idx;
+    focusOverlayAt(idx);
+
+    // iOS Chrome / WebKit fallback: repetir en el siguiente tick del mismo frame
+    // (algunas builds solo levantan teclado si el focus ocurre tras el default click)
+    setTimeout(()=>focusOverlayAt(idx), 0);
   }
 
-  // Capturamos gesto real del usuario (iOS exige que el focus ocurra dentro del handler del tap)
-  const TAP_EVENTS = ['touchstart', 'pointerdown', 'mousedown'];
-  TAP_EVENTS.forEach(t => {
-    window.addEventListener(t, openAtCurrentOrHit, { passive: true });
-  });
+  // Escuchar en CAPTURA para que no nos bloquee el canvas
+  const OPTS_CAPTURE = { passive: true, capture: true };
 
-  // Debug visual opcional del overlay
+  // Orden de intentos:
+  // - touchstart (rápido)
+  // - touchend / pointerup / click (algunos iOS abren teclado solo aquí)
+  window.addEventListener('touchstart', hitTestAndFocus, OPTS_CAPTURE);
+  window.addEventListener('touchend',   hitTestAndFocus, OPTS_CAPTURE);
+  window.addEventListener('pointerdown',hitTestAndFocus, OPTS_CAPTURE);
+  window.addEventListener('pointerup',  hitTestAndFocus, OPTS_CAPTURE);
+  window.addEventListener('mousedown',  hitTestAndFocus, OPTS_CAPTURE);
+  window.addEventListener('click',      hitTestAndFocus, OPTS_CAPTURE);
+
+  // DEBUG: mostrar claramente el overlay input
   function enableOverlayDebug(){
     const inp = document.getElementById('leadgen-overlay-input');
     if (!inp) return;
@@ -2013,7 +2023,9 @@ function cropTransparent(src, alphaThreshold=1){
     inp.style.background = 'rgba(255,0,0,0.08)';
   }
   if (DEBUG) {
-    // puede tardar a crearse: lo activamos cuando aparezca
-    const id = setInterval(()=>{ if (document.getElementById('leadgen-overlay-input')){ enableOverlayDebug(); clearInterval(id); }}, 200);
+    const id = setInterval(()=>{
+      const inp = document.getElementById('leadgen-overlay-input');
+      if (inp){ enableOverlayDebug(); clearInterval(id); }
+    }, 200);
   }
 })();
