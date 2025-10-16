@@ -8,6 +8,9 @@
 // ✅ SFX: BallThrow, SUCCESS, FAIL, ALMOST, SPLASH, Button (con antispam).
 // ✅ Triggers insertados en puntos pedidos (comentados con // AUDIO: ...).
 
+
+
+
 // ============= AUDIO CONFIG (Editar aquí para ajustar volúmenes globalmente) =============
 const AUDIO = {
   master: 0.9,   // multiplicador global
@@ -180,6 +183,7 @@ function _uiClickSound(){
 }
 
 // ================== (FIN AUDIO) ==================
+
 
 // ================== CONFIGURACIÓN MANUAL ==================
 const BASE_W = 1920, BASE_H = 1080;
@@ -409,6 +413,145 @@ let tutorial = { active:false, t:0, shown:{}, startMs:0 };
 // ---------- Viento visual ----------
 let windSpr = { x:0 };
 
+
+// ====== MOBILE LEADGEN: overlay inputs visibles (forzar teclado) ======
+let _leadgenOverlays = null;
+
+function _ensureLeadgenOverlays(){
+  if (_leadgenOverlays) return _leadgenOverlays;
+  const c = document.createElement('div');
+  c.id = 'leadgen-overlays';
+  Object.assign(c.style, {
+    position: 'fixed',
+    left: '0px',
+    top: '0px',
+    width: '100vw',
+    height: '100vh',
+    zIndex: '9999',
+    pointerEvents: 'none'
+  });
+  document.body.appendChild(c);
+  _leadgenOverlays = { container: c, inputs: [] };
+  return _leadgenOverlays;
+}
+
+function _hideLeadgenOverlays(){
+  if (!_leadgenOverlays) return;
+  _leadgenOverlays.container.style.display = 'none';
+}
+
+function _showLeadgenOverlays(){
+  const L = _ensureLeadgenOverlays();
+  L.container.style.display = 'block';
+}
+
+function _destroyLeadgenOverlays(){
+  if (!_leadgenOverlays) return;
+  try { _leadgenOverlays.container.remove(); } catch(e){}
+  _leadgenOverlays = null;
+}
+
+function _ensureOverlayInputs(){
+  const L = _ensureLeadgenOverlays();
+  const F = (CFG && CFG.LEADGEN && CFG.LEADGEN.fields) ? CFG.LEADGEN.fields : [];
+  while (L.inputs.length < F.length){
+    const i = L.inputs.length;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.inputMode = 'text';
+    inp.autocomplete = 'on';
+    inp.spellcheck = false;
+    // Debe ser visible y dentro del viewport (no display:none) para que iOS abra teclado.
+    Object.assign(inp.style, {
+      position: 'fixed',
+      left: '0px',
+      top: '0px',
+      width: '60px',
+      height: '32px',
+      opacity: '0.02',             // casi invisible, pero no 0
+      background: 'transparent',
+      color: 'transparent',         // caret queda, texto no molesta
+      caretColor: 'auto',
+      border: 'none',
+      outline: 'none',
+      fontSize: '16px',             // evita zoom en iOS
+      zIndex: '10000',
+      pointerEvents: 'auto',        // debe captar el tap
+      touchAction: 'auto'
+    });
+    inp.addEventListener('focus', ()=>{
+      // Al enfocar, desactivar guards y sincronizar idx
+      _setGuardsEnabled(false);
+      if (typeof leadgen !== 'undefined'){
+        leadgen.idx = i;
+        const key = CFG.LEADGEN.fields[i].key;
+        _ghostFieldKey = key;
+        inp.value = (leadgen.data && leadgen.data[key]) || '';
+      }
+    });
+    inp.addEventListener('input', ()=>{
+      if (typeof leadgen !== 'undefined' && CFG && CFG.LEADGEN){
+        const key = CFG.LEADGEN.fields[i].key;
+        leadgen.data[key] = inp.value;
+        if (leadgen.errors) leadgen.errors[key] = false;
+        leadgen.message = '';
+      }
+    });
+    inp.addEventListener('keydown', (ev)=>{
+      if (ev.key === 'Enter'){
+        ev.preventDefault();
+        try { leadgenSubmit(); } catch(e){}
+      }
+    });
+    L.container.appendChild(inp);
+    L.inputs.push(inp);
+  }
+  return L.inputs;
+}
+
+function _updateLeadgenOverlays(){
+  if (typeof GAME === 'undefined' || gameState !== GAME.LEADGEN) { _hideLeadgenOverlays(); return; }
+  if (!leadgen || !leadgen._inputRects) return;
+  const inputs = _ensureOverlayInputs();
+  _showLeadgenOverlays();
+  const v = (typeof getViewport === 'function') ? getViewport() : {x:0,y:0,s:1};
+  for (let i=0;i<inputs.length;i++){
+    const r = leadgen._inputRects[i];
+    if (!r) continue;
+    const x = Math.round(v.x + r.x * v.s);
+    const y = Math.round(v.y + r.y * v.s);
+    const w = Math.max(40, Math.round(r.w * v.s));
+    const h = Math.max(28, Math.round(r.h * v.s));
+    const inp = inputs[i];
+    inp.style.left = x + 'px';
+    inp.style.top  = y + 'px';
+    inp.style.width  = w + 'px';
+    inp.style.height = Math.max(32, h) + 'px';
+    // Configurar tipo sugerido
+    const key = CFG.LEADGEN.fields[i].key;
+    if (key === 'email') { inp.type = 'email'; inp.inputMode = 'email'; inp.autocomplete = 'email'; }
+    else { inp.type = 'text'; inp.inputMode = 'text'; inp.autocomplete = (key==='first'||key==='last')?'name':'on'; }
+  }
+}
+
+function _focusLeadgenFieldByIndex(i){
+  // Foco REAL sobre overlay input para abrir teclado
+  const inputs = _ensureOverlayInputs();
+  if (i<0 || i>=inputs.length) return;
+  _showLeadgenOverlays();
+  try { inputs[i].focus({ preventScroll: true }); } catch(e) { inputs[i].focus(); }
+  try { inputs[i].click(); } catch(e) {}
+  try { const L = inputs[i].value.length; inputs[i].setSelectionRange(L, L); } catch(e){}
+}
+
+function _blurLeadgen(){
+  if (_leadgenOverlays && _leadgenOverlays.inputs){
+    _leadgenOverlays.inputs.forEach(inp=>inp.blur());
+  }
+  _setGuardsEnabled(true);
+}
+// ====== END MOBILE LEADGEN: overlay inputs ======
+
 // ---------- Leadgen ----------
 let leadgen = {
   active:false,           // ⬅️ importante: comienza apagado (no bloquea el menú)
@@ -554,7 +697,13 @@ async function _mobileOnFirstUserGesture() {
 }
 
 // Llamado temprano en setup()
-function _mobileInit() {
+function _mobileInit()
+{
+  // [MOBILE] no bloquear gestos en LEADGEN
+  const _origPrevent = (ev)=>{};
+}
+
+function _mobileInit_old {
   _mobileInstallScrollGuards();
 
   // Redundancia: algunos navegadores no disparan correctamente ciertos eventos;
@@ -601,8 +750,7 @@ function fitToScreenNow(){
 }
 
 // ---------- Setup ----------
-// [CLEAN] setup() duplicada desactivada
-function setup__dup_removed_1(){
+function setup(){
   createCanvas(windowWidth, windowHeight);
   imageMode(CORNER);
 
@@ -631,9 +779,11 @@ function draw(){
 }
 
 // ---------- Render ----------
-// [CLEAN] render() duplicada desactivada
+// [CLEAN] render duplicada
 function render__dup_removed_1(){
-  if (gameState === GAME.MENU){ renderMenu(); return; }
+  
+  _leadgenOverlayTickHook();
+if (gameState === GAME.MENU){ renderMenu(); return; }
 
   // [MOBILE] — cuando el dispositivo está en vertical mostramos overlay pidiendo rotar
   if (windowHeight > windowWidth){
@@ -771,9 +921,11 @@ function recordInputSample(now){
 
 // ... (resto de tu simulación, física, HUD, etc. sin cambios) ...
 
+
 // ---------- Setup ----------
 let BILL_REST=null, BILL_RISE=null, BILL_THROW=null;
-function setup(){
+// [CLEAN] setup duplicada
+function setup__dup_removed_1(){
   createCanvas(windowWidth, windowHeight);
   imageMode(CORNER);
 
@@ -792,7 +944,9 @@ function setup(){
   // 🔹 AÑADIR ESTO:
   _mobileInit();  // instala guards de scroll/zoom y primer gesto (fullscreen + lock)
 
-// Carga previa de Leadgen desde localStorage (si existe)
+  
+
+  // Carga previa de Leadgen desde localStorage (si existe)
   if (CFG.LEADGEN.saveToLocalStorage && window.localStorage){
     leadgen.data.first = localStorage.getItem('leadgen_first') || '';
     leadgen.data.last  = localStorage.getItem('leadgen_last')  || '';
@@ -1432,9 +1586,6 @@ function handleLeadgenKeyPressed(){
     // Solo debug: cerrar leadgen
     // leadgen.active = false; gameState = GAME.MENU;
   }
-  // Asegurar foco real al cambiar idx
-  if (gameState === GAME.LEADGEN) _focusLeadgenFieldByIndex(leadgen.idx);
-
 }
 
 // Escribir texto (Leadgen)
@@ -1470,8 +1621,6 @@ function leadgenSubmit(){
     // foco al primero con error
     const order = ['first','last','email'];
     for (let i=0;i<order.length;i++){ if (leadgen.errors[order[i]]){ leadgen.idx = i; break; } }
-    // Enfocar el primer campo con error para abrir teclado
-    setTimeout(()=> _focusLeadgenFieldByIndex(leadgen.idx), 0);
     return;
   }
 
@@ -1802,4 +1951,29 @@ function cropTransparent(src, alphaThreshold=1){
   if (maxX<minX || maxY<minY) return {img:src, ox:0, oy:0};
   const cw=maxX-minX+1, ch=maxY-minY+1;
   return { img:src.get(minX, minY, cw, ch), ox:minX, oy:minY };
+}
+
+
+// Actualizar overlays periódicamente mientras estamos en LEADGEN
+let _leadgenOverlayTimer = null;
+function _leadgenOverlayStart(){
+  if (_leadgenOverlayTimer) return;
+  _leadgenOverlayTimer = setInterval(_updateLeadgenOverlays, 100); // 10fps
+}
+function _leadgenOverlayStop(){
+  if (_leadgenOverlayTimer){ clearInterval(_leadgenOverlayTimer); _leadgenOverlayTimer = null; }
+  _hideLeadgenOverlays();
+}
+
+
+let _prevGameState = null;
+function _leadgenOverlayTickHook(){
+  if (_prevGameState !== gameState){
+    if (typeof GAME !== 'undefined' && gameState === GAME.LEADGEN){ _leadgenOverlayStart(); }
+    else { _leadgenOverlayStop(); }
+    _prevGameState = gameState;
+  }
+  if (typeof GAME !== 'undefined' && gameState === GAME.LEADGEN){
+    _updateLeadgenOverlays();
+  }
 }
