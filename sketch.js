@@ -1958,3 +1958,62 @@ function cropTransparent(src, alphaThreshold=1){
   window.requestAnimationFrame(_tick);
 })();
 /* ==== END MOBILE KEYBOARD PATCH ==== */
+/* ==== MOBILE TAP → OPEN KEYBOARD (final patch) ==== */
+(function(){
+  // Poné en true para ver el overlay encima del campo
+  const DEBUG = false;
+
+  function openAtCurrentOrHit(ev){
+    if (!window.GAME || window.gameState !== window.GAME.LEADGEN) return;
+
+    try{
+      let x, y;
+      if (ev.touches && ev.touches[0]) { x = ev.touches[0].clientX; y = ev.touches[0].clientY; }
+      else { x = ev.clientX; y = ev.clientY; }
+
+      // Si tenemos rects, detectamos qué campo tocaste
+      if (window.leadgen && window.leadgen._inputRects && Array.isArray(window.leadgen._inputRects)){
+        const v = (typeof window.getViewport === 'function') ? window.getViewport() : {x:0,y:0,s:1};
+        for (let i = 0; i < window.leadgen._inputRects.length; i++){
+          const r = window.leadgen._inputRects[i];
+          if (!r) continue;
+          const rx = v.x + r.x * v.s;
+          const ry = v.y + r.y * v.s;
+          const rw = r.w * v.s;
+          const rh = r.h * v.s;
+          if (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh){
+            window.leadgen.idx = i; // sincronizamos índice
+            if (typeof window._focusLeadgenFieldByIndex === 'function') {
+              window._focusLeadgenFieldByIndex(i); // ← abre teclado en el mismo gesto
+            }
+            break;
+          }
+        }
+      } else {
+        // Fallback: enfocamos el índice actual
+        if (typeof window._focusLeadgenFieldByIndex === 'function'){
+          window._focusLeadgenFieldByIndex(window.leadgen?.idx || 0);
+        }
+      }
+    } catch(e){}
+  }
+
+  // Capturamos gesto real del usuario (iOS exige que el focus ocurra dentro del handler del tap)
+  const TAP_EVENTS = ['touchstart', 'pointerdown', 'mousedown'];
+  TAP_EVENTS.forEach(t => {
+    window.addEventListener(t, openAtCurrentOrHit, { passive: true });
+  });
+
+  // Debug visual opcional del overlay
+  function enableOverlayDebug(){
+    const inp = document.getElementById('leadgen-overlay-input');
+    if (!inp) return;
+    inp.style.opacity = '0.25';
+    inp.style.border  = '1px solid red';
+    inp.style.background = 'rgba(255,0,0,0.08)';
+  }
+  if (DEBUG) {
+    // puede tardar a crearse: lo activamos cuando aparezca
+    const id = setInterval(()=>{ if (document.getElementById('leadgen-overlay-input')){ enableOverlayDebug(); clearInterval(id); }}, 200);
+  }
+})();
