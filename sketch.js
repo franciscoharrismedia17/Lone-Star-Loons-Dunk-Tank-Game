@@ -1805,15 +1805,15 @@ function cropTransparent(src, alphaThreshold=1){
 }
 
 
-/* ==== LEADGEN: INPUTS HTML REALES ENCIMA DEL CANVAS (iOS/Android OK) ==== */
+/* ==== LEADGEN: INPUTS HTML REALES ENCIMA DEL CANVAS (FIX v2) ==== */
 (function(){
-  const Z = 2147483000;       // bien arriba de todo
-  const OPACITY = 0.015;      // casi invisible pero "visible" para iOS
-  const FONT_SIZE = '16px';   // evita zoom en iOS
-  const DEBUG = true;        // poné true para ver los rectángulos
+  const Z = 2147483000;
+  const OPACITY = 0.04;        // tenue pero "visible" para iOS
+  const FONT_SIZE = '16px';    // evita zoom en iOS
+  const DEBUG = false;         // poné true para ver los bordes
 
   let wrap = null;
-  let inputs = [];            // un <input> por campo
+  let inputs = [];
   let running = false;
 
   function ensureWrap(){
@@ -1822,7 +1822,9 @@ function cropTransparent(src, alphaThreshold=1){
     wrap.id = 'leadgen-dom-inputs';
     Object.assign(wrap.style, {
       position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
-      zIndex: String(Z), pointerEvents: 'none', display: 'none'
+      zIndex: String(Z),
+      pointerEvents: 'auto',   // <-- CLAVE: el contenedor debe permitir eventos
+      display: 'none'
     });
     document.body.appendChild(wrap);
     return wrap;
@@ -1833,7 +1835,6 @@ function cropTransparent(src, alphaThreshold=1){
     if (!window.CFG || !CFG.LEADGEN || !Array.isArray(CFG.LEADGEN.fields)) return;
     const F = CFG.LEADGEN.fields;
 
-    // crear faltantes
     while (inputs.length < F.length){
       const i = inputs.length;
       const inp = document.createElement('input');
@@ -1843,18 +1844,26 @@ function cropTransparent(src, alphaThreshold=1){
       inp.autocapitalize = 'off';
       inp.spellcheck = false;
       Object.assign(inp.style, {
-        position: 'fixed', left: '0px', top: '0px', width: '80px', height: '34px',
+        position: 'fixed', left: '0px', top: '0px', width: '84px', height: '36px',
         opacity: String(DEBUG ? 0.25 : OPACITY),
-        background: DEBUG ? 'rgba(255,0,0,0.08)' : 'transparent',
-        color: 'transparent', caretColor: DEBUG ? '' : 'auto',
-        border: DEBUG ? '1px solid red' : 'none',
-        outline: 'none', fontSize: FONT_SIZE, zIndex: String(Z+1),
-        pointerEvents: 'auto',            // capta el tap
-        touchAction: 'auto',              // permite teclado/scroll
-        display: 'block'
+        background: DEBUG ? 'rgba(255,0,0,0.06)' : 'transparent',
+        color: 'transparent',
+        caretColor: DEBUG ? '' : 'auto',
+        border: DEBUG ? '1px solid red' : '1px solid transparent',
+        outline: 'none',
+        fontSize: FONT_SIZE,
+        zIndex: String(Z+1),
+        pointerEvents: 'auto',     // el input sí recibe el tap
+        touchAction: 'auto',
+        display: 'block',
+        WebkitAppearance: 'none'
       });
 
-      // Enfocar abre teclado (tap directo en input real)
+      // Evitar que el canvas consuma el gesto antes (fase de captura)
+      ['touchstart','touchend','pointerdown','pointerup','mousedown','mouseup','click']
+        .forEach(ev => inp.addEventListener(ev, e=>{ e.stopPropagation(); }, {capture:true}));
+
+      // Enfocar abre teclado
       inp.addEventListener('focus', ()=>{
         if (window._setGuardsEnabled) _setGuardsEnabled(false);
         if (window.leadgen){ leadgen.idx = i; }
@@ -1884,7 +1893,7 @@ function cropTransparent(src, alphaThreshold=1){
       inputs.push(inp);
     }
 
-    // tipado por campo
+    // Tipo por campo
     for (let i=0;i<F.length;i++){
       const key = F[i].key;
       const inp = inputs[i];
@@ -1905,8 +1914,7 @@ function cropTransparent(src, alphaThreshold=1){
     ensureInputs();
     const v = (typeof getViewport === 'function') ? getViewport() : {x:0,y:0,s:1};
 
-    wrap.style.display = 'block';
-    wrap.style.pointerEvents = 'none'; // el contenedor no tapa; los inputs sí
+    wrap.style.display = 'block';         // NO pointerEvents:none
 
     for (let i=0;i<inputs.length;i++){
       const r = leadgen._inputRects[i];
@@ -1915,35 +1923,22 @@ function cropTransparent(src, alphaThreshold=1){
       const x = Math.round(v.x + r.x * v.s);
       const y = Math.round(v.y + r.y * v.s);
       const w = Math.max(48, Math.round(r.w * v.s));
-      const h = Math.max(32, Math.round(r.h * v.s));
+      const h = Math.max(34, Math.round(r.h * v.s));
       Object.assign(inp.style, {
         display:'block', left: x+'px', top: y+'px', width: w+'px', height: h+'px'
       });
 
-      // valor actual
       try {
         const key = CFG.LEADGEN.fields[i].key;
         const val = (leadgen.data && key) ? (leadgen.data[key] || '') : '';
         if (inp.value !== val) inp.value = val;
       } catch(e){}
     }
-
-    // Enfocar el actual si viene de teclado/validación
-    if (typeof leadgen.idx === 'number' && inputs[leadgen.idx]){
-      // no forzamos focus aquí para no “robar” el gesto;
-      // el tap del usuario cae directamente sobre el input real → abre teclado
-    }
   }
 
   function hide(){
     if (!wrap) return;
     wrap.style.display = 'none';
-  }
-
-  function destroy(){
-    if (!wrap) return;
-    try { wrap.remove(); } catch(e){}
-    wrap = null; inputs = [];
   }
 
   function blurAll(){
@@ -1963,18 +1958,15 @@ function cropTransparent(src, alphaThreshold=1){
     requestAnimationFrame(tick);
   }
 
-  // Integración: cuando se envía correctamente, cerramos teclado
   const origSubmit = window.leadgenSubmit;
   if (typeof origSubmit === 'function'){
     window.leadgenSubmit = function(){
       let r;
       try { r = origSubmit(); } catch(e){}
-      // si pasa a gameplay, cerramos/ocultamos
       setTimeout(blurAll, 0);
       return r;
     };
   }
 
-  // Arranque
   requestAnimationFrame(tick);
 })();
