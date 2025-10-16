@@ -8,9 +8,6 @@
 // ✅ SFX: BallThrow, SUCCESS, FAIL, ALMOST, SPLASH, Button (con antispam).
 // ✅ Triggers insertados en puntos pedidos (comentados con // AUDIO: ...).
 
-
-
-
 // ============= AUDIO CONFIG (Editar aquí para ajustar volúmenes globalmente) =============
 const AUDIO = {
   master: 0.9,   // multiplicador global
@@ -183,7 +180,6 @@ function _uiClickSound(){
 }
 
 // ================== (FIN AUDIO) ==================
-
 
 // ================== CONFIGURACIÓN MANUAL ==================
 const BASE_W = 1920, BASE_H = 1080;
@@ -605,7 +601,8 @@ function fitToScreenNow(){
 }
 
 // ---------- Setup ----------
-function setup(){
+// [CLEAN] setup() duplicada desactivada
+function setup__dup_removed_1(){
   createCanvas(windowWidth, windowHeight);
   imageMode(CORNER);
 
@@ -634,7 +631,8 @@ function draw(){
 }
 
 // ---------- Render ----------
-function render(){
+// [CLEAN] render() duplicada desactivada
+function render__dup_removed_1(){
   if (gameState === GAME.MENU){ renderMenu(); return; }
 
   // [MOBILE] — cuando el dispositivo está en vertical mostramos overlay pidiendo rotar
@@ -773,7 +771,6 @@ function recordInputSample(now){
 
 // ... (resto de tu simulación, física, HUD, etc. sin cambios) ...
 
-
 // ---------- Setup ----------
 let BILL_REST=null, BILL_RISE=null, BILL_THROW=null;
 function setup(){
@@ -795,9 +792,7 @@ function setup(){
   // 🔹 AÑADIR ESTO:
   _mobileInit();  // instala guards de scroll/zoom y primer gesto (fullscreen + lock)
 
-  
-
-  // Carga previa de Leadgen desde localStorage (si existe)
+// Carga previa de Leadgen desde localStorage (si existe)
   if (CFG.LEADGEN.saveToLocalStorage && window.localStorage){
     leadgen.data.first = localStorage.getItem('leadgen_first') || '';
     leadgen.data.last  = localStorage.getItem('leadgen_last')  || '';
@@ -1437,6 +1432,9 @@ function handleLeadgenKeyPressed(){
     // Solo debug: cerrar leadgen
     // leadgen.active = false; gameState = GAME.MENU;
   }
+  // Asegurar foco real al cambiar idx
+  if (gameState === GAME.LEADGEN) _focusLeadgenFieldByIndex(leadgen.idx);
+
 }
 
 // Escribir texto (Leadgen)
@@ -1472,6 +1470,8 @@ function leadgenSubmit(){
     // foco al primero con error
     const order = ['first','last','email'];
     for (let i=0;i<order.length;i++){ if (leadgen.errors[order[i]]){ leadgen.idx = i; break; } }
+    // Enfocar el primer campo con error para abrir teclado
+    setTimeout(()=> _focusLeadgenFieldByIndex(leadgen.idx), 0);
     return;
   }
 
