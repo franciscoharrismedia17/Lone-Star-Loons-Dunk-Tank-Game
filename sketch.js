@@ -1810,7 +1810,7 @@ function cropTransparent(src, alphaThreshold=1){
   const Z = 2147483000;       // bien arriba de todo
   const OPACITY = 0.015;      // casi invisible pero "visible" para iOS
   const FONT_SIZE = '16px';   // evita zoom en iOS
-  const DEBUG = false;        // poné true para ver los rectángulos
+  const DEBUG = true;        // poné true para ver los rectángulos
 
   let wrap = null;
   let inputs = [];            // un <input> por campo
