@@ -673,7 +673,7 @@ function mouseReleased(){
 function touchStarted(){
   resumeAudioIfNeeded(); // AUDIO: gate en primer input
 
-  // 🟢 Soporte táctil para el menú START (mismo flujo que mousePressed)
+  // 🟢 Menú START (mismo flujo que mousePressed)
   if (gameState === GAME.MENU){
     const b = menu.btn;
     const t = (touches && touches[0]) ? touches[0] : {x:mouseX, y:mouseY};
@@ -683,18 +683,40 @@ function touchStarted(){
     return false; // evita scroll/zoom del navegador
   }
 
-  // Botones del overlay de fin de nivel
+  // Botones del overlay al final de nivel
   if (gameState === GAME.LEVEL_END){
-    // usamos mouseX/mouseY porque p5 los mantiene con la última posición
     if (handleOverlayTapAt(mouseX, mouseY)) return false;
   }
 
-  // Leadgen y tutorial
+  // Leadgen / tutorial
   if (gameState === GAME.LEADGEN){ handleLeadgenMouse(); return false; }
   if (tutorial.active){ tutorialDismiss(); return false; }
 
   // Gesto de tiro
   beginHold();
+  return false;
+}
+
+function touchEnded(){
+  // 🟢 Confirmación de START (mismo flujo que mouseReleased)
+  if (gameState === GAME.MENU){
+    const b = menu.btn;
+    const inside = mouseX >= b.x && mouseX <= b.x + b.w && mouseY >= b.y && mouseY <= b.y + b.h;
+    const wasPressed = b.pressed;
+    b.pressed = false;
+    if (wasPressed && inside){
+      _uiClickSound(); // AUDIO botón
+      if (CFG.LEADGEN.enabled){
+        leadgen.active = true;
+        gameState = GAME.LEADGEN;
+      } else {
+        startLevel();
+      }
+    }
+    return false;
+  }
+
+  if (gameState !== GAME.LEADGEN) endHold();
   return false;
 }
 
