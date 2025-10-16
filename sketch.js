@@ -1843,171 +1843,193 @@ function _blurLeadgen(){
 }
 
 
-/* ==== LEADGEN TAKEOVER FULLPAGE — SOLO EN MOBILE ==== */
+/* ==== MOBILE-ONLY LEADGEN IN NEW TAB (guaranteed keyboard; opens on tap gesture) ==== */
 (function(){
-  function isMobile(){
-    const ua = navigator.userAgent || '';
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const android = /Android/.test(ua);
-    // consideramos "mobile" si iOS o Android y pantalla angosta
-    const smallScreen = Math.min(window.innerWidth, window.innerHeight) <= 900;
-    return isTouch && (iOS || android) && smallScreen;
-  }
-  if (!isMobile()) return; // <-- solo se activa en mobile
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/.test(ua);
+  const smallSide = Math.min(window.innerWidth, window.innerHeight);
+  const isMobile = isTouch && (isIOS || isAndroid) && smallSide <= 980;
 
-  const Z = 2147483900;
-  const FONT = '-apple-system, system-ui, Segoe UI, Roboto, Ubuntu, sans-serif';
-  let root = null, form = null, firstI, lastI, emailI, goBtn, cancelBtn, msg;
-  let canvasEl = null, wasHidden = false;
+  if (!isMobile) return;
 
-  function ensureCanvasRef(){
-    if (!canvasEl){
-      canvasEl = document.querySelector('canvas');
-    }
-  }
+  // Prevent double install
+  if (window.__LEADGEN_NEWTAB_INSTALLED__) return;
+  window.__LEADGEN_NEWTAB_INSTALLED__ = true;
 
-  function ensureUI(){
-    if (root) return root;
-    root = document.createElement('div');
-    root.id = 'leadgen-takeover';
-    Object.assign(root.style, {
-      position:'fixed', inset:'0', zIndex:String(Z),
-      background:'#0f0f10', color:'#fff', display:'none',
-      overflow:'auto'
-    });
+  // --- Parent: receive data from child ---
+  window.addEventListener('message', function(ev){
+    try {
+      if (!ev || !ev.data || ev.data.__leadgen__ !== true) return;
+      if (!window.leadgen) window.leadgen = {data:{}, errors:{}, message:''};
+      leadgen.data.first = ev.data.first || '';
+      leadgen.data.last  = ev.data.last  || '';
+      leadgen.data.email = ev.data.email || '';
+      if (!leadgen.errors) leadgen.errors = {};
+      leadgen.errors.first = !leadgen.data.first;
+      leadgen.errors.last  = !leadgen.data.last;
+      leadgen.errors.email = !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadgen.data.email||'');
+      leadgen.message = ev.data.ok ? 'Thanks! Loading…' : (ev.data.msg || '');
+      // If a submit handler exists, run it
+      try { if (typeof window.leadgenSubmit === 'function') window.leadgenSubmit(); } catch(e){}
+      // Return to gameplay if gameState is available
+      try { if (window.GAME) window.gameState = window.GAME.GAMEPLAY; } catch(e){}
+    } catch(e){}
+  }, {capture:true});
 
-    const box = document.createElement('div');
-    Object.assign(box.style, {
-      maxWidth:'560px', margin:'min(12vh,80px) auto', padding:'20px 16px 28px',
-      fontFamily:FONT
-    });
-
-    const title = document.createElement('div');
-    title.textContent = 'Continuemos con tus datos';
-    Object.assign(title.style, {fontSize:'20px', fontWeight:'700', marginBottom:'12px'});
-
-    msg = document.createElement('div');
-    msg.textContent = 'Completá el formulario para seguir jugando.';
-    Object.assign(msg.style, {fontSize:'14px', opacity:'0.9', marginBottom:'16px'});
-
-    form = document.createElement('form'); form.autocomplete='on'; form.noValidate=true;
-
-    function field(label, name, type, ac){
-      const wrap = document.createElement('label');
-      Object.assign(wrap.style, {display:'block', margin:'12px 0'});
-      const l = document.createElement('div'); l.textContent = label;
-      Object.assign(l.style, {fontSize:'13px', opacity:'0.9', marginBottom:'6px'});
-      const i = document.createElement('input');
-      Object.assign(i.style, {
-        width:'100%', height:'44px', borderRadius:'12px', border:'1px solid #2c2c2e',
-        background:'#171718', color:'#fff', padding:'0 12px', outline:'none', fontSize:'16px'
-      });
-      i.name=name; i.type=type; i.inputMode=(type==='email'?'email':'text'); i.autocomplete=ac;
-      wrap.appendChild(l); wrap.appendChild(i);
-      return {wrap, inp:i};
-    }
-
-    const f1 = field('Nombre',  'first', 'text',  'given-name');
-    const f2 = field('Apellido','last',  'text',  'family-name');
-    const f3 = field('Email',   'email', 'email', 'email');
-    firstI = f1.inp; lastI  = f2.inp; emailI = f3.inp;
-
-    const row = document.createElement('div');
-    Object.assign(row.style, {display:'flex', gap:'10px', marginTop:'16px'});
-    const makeBtn = (label, primary)=>{
-      const b = document.createElement('button');
-      b.type = primary ? 'submit' : 'button';
-      b.textContent = label;
-      Object.assign(b.style, {
-        flex:'1 1 0', height:'44px', borderRadius:'12px', border:'1px solid #2c2c2e',
-        background: primary ? '#0a84ff' : 'transparent', color:'#fff', fontWeight:'600', fontSize:'15px'
-      });
-      return b;
-    };
-    const submitBtn = makeBtn('Continuar', true);
-    const cancelBtn = makeBtn('Cancelar', false);
-    row.appendChild(submitBtn); row.appendChild(cancelBtn);
-
-    form.appendChild(f1.wrap); form.appendChild(f2.wrap); form.appendChild(f3.wrap);
-    box.appendChild(title); box.appendChild(msg); box.appendChild(form); box.appendChild(row);
-    root.appendChild(box);
-    document.body.appendChild(root);
-
-    // behavior
-    cancelBtn.addEventListener('click', hide);
-    form.addEventListener('submit', (ev)=>{
-      ev.preventDefault();
-      try {
-        if (!window.leadgen) window.leadgen = {data:{}, errors:{}};
-        const d = leadgen.data;
-        d.first = (firstI.value||'').trim();
-        d.last  = (lastI.value||'').trim();
-        d.email = (emailI.value||'').trim();
-        const bad = {};
-        if (!d.first) bad.first=true;
-        if (!d.last)  bad.last=true;
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email||'')) bad.email=true;
-        msg.style.color = Object.keys(bad).length ? '#ff6767' : '#9eff8a';
-        msg.textContent = Object.keys(bad).length ? 'Revisá los campos marcados.' : '¡Gracias!';
-        [ ['first',firstI], ['last',lastI], ['email',emailI] ].forEach(([k,inp])=>{
-          inp.style.borderColor = bad[k] ? '#ff6767' : '#2c2c2e';
+  function buildChildHTML(){
+    const css = `
+      html,body{margin:0;padding:0;background:#0f0f10;color:#fff;font:16px/1.4 -apple-system,system-ui,Segoe UI,Roboto,Ubuntu,sans-serif;height:100%}
+      .box{max-width:560px;margin:12vh auto;padding:20px 16px 28px;background:#111;border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+      .t{font-weight:700;font-size:20px;margin:0 0 10px}
+      .m{font-size:14px;opacity:.9;margin:0 0 12px}
+      label{display:block;margin:12px 0}
+      .l{font-size:13px;opacity:.9;margin:0 0 6px}
+      input{width:100%;height:44px;border-radius:12px;border:1px solid #2c2c2e;background:#171718;color:#fff;padding:0 12px;outline:none;font-size:16px}
+      .row{display:flex;gap:10px;margin-top:16px}
+      button{flex:1 1 0;height:44px;border-radius:12px;border:1px solid #2c2c2e;background:transparent;color:#fff;font-weight:600;font-size:15px}
+      .primary{background:#0a84ff}
+      .err{border-color:#ff6767 !important}
+      .ok{color:#9eff8a}
+    `;
+    const js = `
+      (function(){
+        function $(s){return document.querySelector(s)}
+        function send(payload){
+          try{ window.opener && window.opener.postMessage(payload,'*'); }catch(e){}
+        }
+        document.addEventListener('DOMContentLoaded', function(){
+          const f = $('#first'), l = $('#last'), e = $('#email'), msg = $('#msg'), form = $('#form');
+          // Prefill from localStorage if any
+          try{
+            f.value = localStorage.getItem('leadgen_first') || '';
+            l.value = localStorage.getItem('leadgen_last')  || '';
+            e.value = localStorage.getItem('leadgen_email') || '';
+          }catch(_){}
+          setTimeout(()=> f.focus(), 0);
+          form.addEventListener('submit', function(ev){
+            ev.preventDefault();
+            const data = {first:f.value.trim(), last:l.value.trim(), email:e.value.trim()};
+            const bad = {};
+            if (!data.first) bad.first = true;
+            if (!data.last)  bad.last = true;
+            if (!/^([^@\\s]+)@([^@\\s]+)\\.[^@\\s]+$/.test(data.email||'')) bad.email = true;
+            f.classList.toggle('err', !!bad.first);
+            l.classList.toggle('err', !!bad.last);
+            e.classList.toggle('err', !!bad.email);
+            if (Object.keys(bad).length){
+              msg.textContent = 'Revisá los campos marcados.';
+              msg.className = 'm';
+              (bad.first && f.focus()) || (bad.last && l.focus()) || (bad.email && e.focus());
+              return;
+            }
+            try{
+              localStorage.setItem('leadgen_first', data.first);
+              localStorage.setItem('leadgen_last',  data.last);
+              localStorage.setItem('leadgen_email', data.email);
+            }catch(_){}
+            msg.textContent = '¡Gracias! Ya volvés al juego…';
+            msg.className = 'm ok';
+            send({__leadgen__:true, ok:true, ...data});
+            setTimeout(()=> window.close(), 300);
+          });
+          $('#cancel').addEventListener('click', function(){
+            send({__leadgen__:true, ok:false, msg:'cancelled'});
+            window.close();
+          });
         });
-        if (Object.keys(bad).length){
-          (bad.first && firstI.focus()) || (bad.last && lastI.focus()) || (bad.email && emailI.focus());
-          return;
-        }
-        if (!leadgen.errors) leadgen.errors = {};
-        leadgen.errors.first=false; leadgen.errors.last=false; leadgen.errors.email=false;
-        if (window.CFG && CFG.LEADGEN && CFG.LEADGEN.saveToLocalStorage && window.localStorage){
-          localStorage.setItem('leadgen_first', d.first);
-          localStorage.setItem('leadgen_last',  d.last);
-          localStorage.setItem('leadgen_email', d.email);
-        }
-        hide();
-        if (typeof window.leadgenSubmit === 'function'){
-          try { window.leadgenSubmit(); } catch(e){}
-        } else {
-          if (window.GAME){ window.gameState = window.GAME.GAMEPLAY; }
-        }
-      } catch(e){ hide(); }
-    });
+      })();
+    `;
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Formulario</title><style>${css}</style></head><body><div class="box"><h1 class="t">Continuemos con tus datos</h1><div id="msg" class="m">Completá el formulario para seguir jugando.</div><form id="form" autocomplete="on" novalidate><label><div class="l">Nombre</div><input id="first" type="text" inputmode="text" autocomplete="given-name"></label><label><div class="l">Apellido</div><input id="last" type="text" inputmode="text" autocomplete="family-name"></label><label><div class="l">Email</div><input id="email" type="email" inputmode="email" autocomplete="email"></label><div class="row"><button type="submit" class="primary">Continuar</button><button type="button" id="cancel">Cancelar</button></div></form></div><script>${js}<\/script></body></html>`;
   }
 
-  function show(){
-    ensureCanvasRef();
-    ensureUI();
+  function openLeadgenWindow(){
     try{
-      if (window.leadgen && leadgen.data){
-        firstI.value = leadgen.data.first || '';
-        lastI.value  = leadgen.data.last  || '';
-        emailI.value = leadgen.data.email || '';
-      }
-    }catch(e){}
-    // Ocultar canvas para que NADA intercepte gestos en móvil
-    if (canvasEl && canvasEl.style.display !== 'none'){ canvasEl.style.display = 'none'; wasHidden = true; }
-    root.style.display = 'block';
-    setTimeout(()=> firstI.focus(), 0);
-  }
-
-  function hide(){
-    if (!root) return;
-    root.style.display = 'none';
-    if (wasHidden && canvasEl){
-      canvasEl.style.display = '';
-      wasHidden = false;
+      // Must be called within a user gesture for popup blockers
+      const w = window.open('', '_blank', 'noopener,noreferrer');
+      if (!w) return false;
+      w.document.open();
+      w.document.write(buildChildHTML());
+      w.document.close();
+      return true;
+    }catch(e){
+      return false;
     }
   }
 
-  let wasLead = false;
+  // Hook a FIRST TAP during LEADGEN to open the window (within gesture)
+  let armed = false;
+  function arm(){
+    // arm only once per entry to leadgen
+    if (armed) return;
+    armed = true;
+    const opts = {capture:true, passive:false};
+    function handler(ev){
+      try{
+        if (!(window.GAME && window.gameState === window.GAME.LEADGEN)) return;
+        // Attempt to open child window within the gesture
+        const ok = openLeadgenWindow();
+        if (ok){
+          // prevent the canvas from stealing the tap
+          ev.preventDefault();
+          ev.stopPropagation();
+          // disarm
+          window.removeEventListener('touchend', handler, opts);
+          window.removeEventListener('pointerup', handler, opts);
+          window.removeEventListener('click', handler, opts);
+        }
+      }catch(_){}
+    }
+    window.addEventListener('touchend', handler, opts);
+    window.addEventListener('pointerup', handler, opts);
+    window.addEventListener('click', handler, opts);
+  }
+
+  // Monitor game state
+  let prev = null;
   function tick(){
     try{
       const onLead = !!(window.GAME && window.gameState === window.GAME.LEADGEN);
-      if (onLead && !wasLead){ show(); }
-      else if (!onLead && wasLead){ hide(); }
-      wasLead = onLead;
+      if (onLead && prev !== 'LEAD'){
+        prev = 'LEAD';
+        armed = false;
+        arm(); // arm opening on next tap
+        // Optional: show a tiny hint button in case popup blocked
+        ensureHint();
+      } else if (!onLead && prev === 'LEAD'){
+        prev = 'OTHER';
+        removeHint();
+      }
     }catch(e){}
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+
+  // UI hint in case popup blocker blocks the new tab
+  let hintBtn;
+  function ensureHint(){
+    if (hintBtn) return;
+    hintBtn = document.createElement('button');
+    hintBtn.textContent = 'Abrir formulario';
+    Object.assign(hintBtn.style, {
+      position:'fixed', right:'10px', bottom:'10px', zIndex: 2147483647,
+      fontSize:'14px', padding:'8px 10px', borderRadius:'10px',
+      border:'1px solid #2c2c2e', background:'#0a84ff', color:'#fff'
+    });
+    hintBtn.addEventListener('click', function(ev){
+      const ok = openLeadgenWindow();
+      if (ok){
+        ev.preventDefault();
+        ev.stopPropagation();
+      } else {
+        alert('Permití ventanas emergentes para abrir el formulario.');
+      }
+    }, {capture:true});
+    document.body.appendChild(hintBtn);
+  }
+  function removeHint(){
+    if (hintBtn && hintBtn.parentNode) hintBtn.parentNode.removeChild(hintBtn);
+    hintBtn = null;
+  }
 })();
