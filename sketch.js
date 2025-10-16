@@ -1805,227 +1805,176 @@ function cropTransparent(src, alphaThreshold=1){
 }
 
 
-/* ==== MOBILE KEYBOARD PATCH (non-destructivo) ==== */
+/* ==== LEADGEN: INPUTS HTML REALES ENCIMA DEL CANVAS (iOS/Android OK) ==== */
 (function(){
-  if (typeof window === 'undefined') return;
+  const Z = 2147483000;       // bien arriba de todo
+  const OPACITY = 0.015;      // casi invisible pero "visible" para iOS
+  const FONT_SIZE = '16px';   // evita zoom en iOS
+  const DEBUG = false;        // poné true para ver los rectángulos
 
-  let _overlayInput = null;
-  let _overlayDiv = null;
+  let wrap = null;
+  let inputs = [];            // un <input> por campo
+  let running = false;
 
-  function _ensureOverlay(){
-    if (_overlayInput && _overlayDiv) return _overlayInput;
-    _overlayDiv = document.getElementById('leadgen-overlay-container');
-    if (!_overlayDiv){
-      _overlayDiv = document.createElement('div');
-      _overlayDiv.id = 'leadgen-overlay-container';
-      Object.assign(_overlayDiv.style, {
-        position: 'fixed',
-        left: '0px',
-        top: '0px',
-        width: '100vw',
-        height: '100vh',
-        zIndex: '9999',
-        pointerEvents: 'none',
+  function ensureWrap(){
+    if (wrap) return wrap;
+    wrap = document.createElement('div');
+    wrap.id = 'leadgen-dom-inputs';
+    Object.assign(wrap.style, {
+      position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
+      zIndex: String(Z), pointerEvents: 'none', display: 'none'
+    });
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+
+  function ensureInputs(){
+    ensureWrap();
+    if (!window.CFG || !CFG.LEADGEN || !Array.isArray(CFG.LEADGEN.fields)) return;
+    const F = CFG.LEADGEN.fields;
+
+    // crear faltantes
+    while (inputs.length < F.length){
+      const i = inputs.length;
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.inputMode = 'text';
+      inp.autocomplete = 'on';
+      inp.autocapitalize = 'off';
+      inp.spellcheck = false;
+      Object.assign(inp.style, {
+        position: 'fixed', left: '0px', top: '0px', width: '80px', height: '34px',
+        opacity: String(DEBUG ? 0.25 : OPACITY),
+        background: DEBUG ? 'rgba(255,0,0,0.08)' : 'transparent',
+        color: 'transparent', caretColor: DEBUG ? '' : 'auto',
+        border: DEBUG ? '1px solid red' : 'none',
+        outline: 'none', fontSize: FONT_SIZE, zIndex: String(Z+1),
+        pointerEvents: 'auto',            // capta el tap
+        touchAction: 'auto',              // permite teclado/scroll
+        display: 'block'
       });
-      document.body.appendChild(_overlayDiv);
-    }
-    _overlayInput = document.getElementById('leadgen-overlay-input');
-    if (!_overlayInput){
-      _overlayInput = document.createElement('input');
-      _overlayInput.id = 'leadgen-overlay-input';
-      _overlayInput.type = 'text';
-      _overlayInput.inputMode = 'text';
-      _overlayInput.autocomplete = 'on';
-      _overlayInput.spellcheck = false;
-      Object.assign(_overlayInput.style, {
-        position: 'fixed',
-        left: '0px',
-        top: '0px',
-        width: '80px',
-        height: '34px',
-        opacity: '0.02',        // visible para el navegador, invisible para el ojo
-        background: 'transparent',
-        color: 'transparent',
-        caretColor: 'auto',
-        border: 'none',
-        outline: 'none',
-        fontSize: '16px',        // evita zoom en iOS
-        zIndex: '10000',
-        pointerEvents: 'auto',   // debe recibir el tap
-        touchAction: 'auto',
-        display: 'none',
-      });
-      _overlayDiv.appendChild(_overlayInput);
 
-      _overlayInput.addEventListener('input', function(){
+      // Enfocar abre teclado (tap directo en input real)
+      inp.addEventListener('focus', ()=>{
+        if (window._setGuardsEnabled) _setGuardsEnabled(false);
+        if (window.leadgen){ leadgen.idx = i; }
+      });
+
+      // Sincronizar texto con tu estado
+      inp.addEventListener('input', ()=>{
         try{
-          if (!window.CFG || !window.CFG.LEADGEN || !window.leadgen) return;
-          const key = window.CFG.LEADGEN.fields[window.leadgen.idx]?.key;
-          if (!key) return;
-          window.leadgen.data[key] = _overlayInput.value;
-          if (window.leadgen.errors) window.leadgen.errors[key] = false;
-          window.leadgen.message = '';
+          const key = CFG.LEADGEN.fields[i].key;
+          if (!window.leadgen) return;
+          leadgen.data[key] = inp.value;
+          if (leadgen.errors) leadgen.errors[key] = false;
+          leadgen.message = '';
         }catch(e){}
       });
-      _overlayInput.addEventListener('keydown', function(ev){
+
+      // Enter → submit
+      inp.addEventListener('keydown', (ev)=>{
         if (ev.key === 'Enter'){
           ev.preventDefault();
-          try{ window.leadgenSubmit && window.leadgenSubmit(); }catch(e){}
+          try { window.leadgenSubmit && leadgenSubmit(); } catch(e){}
+          blurAll();
         }
       });
+
+      wrap.appendChild(inp);
+      inputs.push(inp);
     }
-    return _overlayInput;
+
+    // tipado por campo
+    for (let i=0;i<F.length;i++){
+      const key = F[i].key;
+      const inp = inputs[i];
+      if (key === 'email'){
+        inp.type = 'email'; inp.inputMode = 'email'; inp.autocomplete = 'email';
+      } else {
+        inp.type = 'text';  inp.inputMode = 'text';
+        inp.autocomplete = (key==='first'||key==='last') ? 'name' : 'on';
+      }
+    }
   }
 
-  function _positionOverlayForIndex(i){
-    try{
-      if (!window.CFG || !window.CFG.LEADGEN || !window.leadgen || !window.leadgen._inputRects) return false;
-      const rect = window.leadgen._inputRects[i];
-      if (!rect) return false;
-      const v = (typeof window.getViewport === 'function') ? window.getViewport() : {x:0,y:0,s:1};
-      const x = Math.round(v.x + rect.x * v.s);
-      const y = Math.round(v.y + rect.y * v.s);
-      const w = Math.max(48, Math.round(rect.w * v.s));
-      const h = Math.max(32, Math.round(rect.h * v.s));
-      const inp = _ensureOverlay();
-      inp.style.left = x + 'px';
-      inp.style.top  = y + 'px';
-      inp.style.width  = w + 'px';
-      inp.style.height = h + 'px';
-      // Tipo según campo
-      const key = window.CFG.LEADGEN.fields[i]?.key;
-      if (key === 'email'){ inp.type = 'email'; inp.inputMode = 'email'; inp.autocomplete = 'email'; }
-      else { inp.type = 'text'; inp.inputMode = 'text'; inp.autocomplete = (key==='first'||key==='last')?'name':'on'; }
-      // Valor actual
-      inp.value = (window.leadgen.data && key) ? (window.leadgen.data[key] || '') : '';
-      return true;
-    }catch(e){ return false; }
+  function updatePositions(){
+    if (!window.GAME || gameState !== GAME.LEADGEN || !window.leadgen || !leadgen._inputRects){
+      hide();
+      return;
+    }
+    ensureInputs();
+    const v = (typeof getViewport === 'function') ? getViewport() : {x:0,y:0,s:1};
+
+    wrap.style.display = 'block';
+    wrap.style.pointerEvents = 'none'; // el contenedor no tapa; los inputs sí
+
+    for (let i=0;i<inputs.length;i++){
+      const r = leadgen._inputRects[i];
+      const inp = inputs[i];
+      if (!r){ inp.style.display='none'; continue; }
+      const x = Math.round(v.x + r.x * v.s);
+      const y = Math.round(v.y + r.y * v.s);
+      const w = Math.max(48, Math.round(r.w * v.s));
+      const h = Math.max(32, Math.round(r.h * v.s));
+      Object.assign(inp.style, {
+        display:'block', left: x+'px', top: y+'px', width: w+'px', height: h+'px'
+      });
+
+      // valor actual
+      try {
+        const key = CFG.LEADGEN.fields[i].key;
+        const val = (leadgen.data && key) ? (leadgen.data[key] || '') : '';
+        if (inp.value !== val) inp.value = val;
+      } catch(e){}
+    }
+
+    // Enfocar el actual si viene de teclado/validación
+    if (typeof leadgen.idx === 'number' && inputs[leadgen.idx]){
+      // no forzamos focus aquí para no “robar” el gesto;
+      // el tap del usuario cae directamente sobre el input real → abre teclado
+    }
   }
 
-  function _openKeyboardForIndex(i){
-    const ok = _positionOverlayForIndex(i);
-    const inp = _ensureOverlay();
-    if (!ok){ inp.style.display = 'none'; return; }
-    try{
-      inp.style.display = 'block';
-      // Desactivar guards si existen
-      if (window._setGuardsEnabled) window._setGuardsEnabled(false);
-      // Foco real y selección al final
-      try { inp.focus({ preventScroll: true }); } catch(e) { inp.focus(); }
-      try { inp.click(); } catch(e) {}
-      try { const L = inp.value.length; inp.setSelectionRange(L, L); } catch(e){}
-    }catch(e){}
+  function hide(){
+    if (!wrap) return;
+    wrap.style.display = 'none';
   }
 
-  function _closeKeyboard(){
-    const inp = _ensureOverlay();
-    try { inp.blur(); } catch(e){}
-    inp.style.display = 'none';
-    if (window._setGuardsEnabled) window._setGuardsEnabled(true);
+  function destroy(){
+    if (!wrap) return;
+    try { wrap.remove(); } catch(e){}
+    wrap = null; inputs = [];
   }
 
-  // Monkey-patch no destructivo
-  const _origFocusIdx = window._focusLeadgenFieldByIndex;
-  if (typeof _origFocusIdx === 'function'){
-    window._focusLeadgenFieldByIndex = function(i){
-      try{ _origFocusIdx(i); }catch(e){}
-      _openKeyboardForIndex(i);
-    };
+  function blurAll(){
+    inputs.forEach(inp => { try{ inp.blur(); }catch(e){} });
+    if (window._setGuardsEnabled) _setGuardsEnabled(true);
   }
 
-  const _origSubmit = window.leadgenSubmit;
-  if (typeof _origSubmit === 'function'){
+  function tick(){
+    if (window.GAME && gameState === GAME.LEADGEN){
+      running = true;
+      updatePositions();
+    } else {
+      if (running){ blurAll(); }
+      hide();
+      running = false;
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Integración: cuando se envía correctamente, cerramos teclado
+  const origSubmit = window.leadgenSubmit;
+  if (typeof origSubmit === 'function'){
     window.leadgenSubmit = function(){
       let r;
-      try{ r = _origSubmit(); }catch(e){}
-      _closeKeyboard();
+      try { r = origSubmit(); } catch(e){}
+      // si pasa a gameplay, cerramos/ocultamos
+      setTimeout(blurAll, 0);
       return r;
     };
   }
 
-  // Si el juego usa render()/draw() para pintar, sincronizamos posición del overlay
-  function _tick(){
-    try{
-      if (window.GAME && window.gameState === window.GAME.LEADGEN && typeof window.leadgen?.idx === 'number'){
-        _positionOverlayForIndex(window.leadgen.idx);
-      } else {
-        const inp = _ensureOverlay();
-        inp.style.display = 'none';
-      }
-    }catch(e){}
-    window.requestAnimationFrame(_tick);
-  }
-  window.requestAnimationFrame(_tick);
-})();
-/* ==== END MOBILE KEYBOARD PATCH ==== */
-/* ==== MOBILE TAP → OPEN KEYBOARD (iOS LANDSCAPE FIX) ==== */
-(function(){
-  // Activa para ver el overlay: borde y mayor opacidad
-  const DEBUG = false;
-
-  function focusOverlayAt(i){
-    if (typeof window._focusLeadgenFieldByIndex === 'function') {
-      window._focusLeadgenFieldByIndex(i);
-    }
-  }
-
-  function hitTestAndFocus(ev){
-    if (!window.GAME || window.gameState !== window.GAME.LEADGEN) return;
-
-    let x, y;
-    if (ev.touches && ev.touches[0]) { x = ev.touches[0].clientX; y = ev.touches[0].clientY; }
-    else if (ev.changedTouches && ev.changedTouches[0]) { x = ev.changedTouches[0].clientX; y = ev.changedTouches[0].clientY; }
-    else { x = ev.clientX; y = ev.clientY; }
-
-    let idx = (window.leadgen?.idx ?? 0);
-    try {
-      if (window.leadgen && Array.isArray(window.leadgen._inputRects)) {
-        const v = (typeof window.getViewport === 'function') ? window.getViewport() : {x:0,y:0,s:1};
-        for (let i = 0; i < window.leadgen._inputRects.length; i++){
-          const r = window.leadgen._inputRects[i]; if (!r) continue;
-          const rx = v.x + r.x * v.s;
-          const ry = v.y + r.y * v.s;
-          const rw = r.w * v.s;
-          const rh = r.h * v.s;
-          if (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh){ idx = i; break; }
-        }
-      }
-    } catch(e){}
-
-    // Sincronizá el índice y enfocá dentro del MISMO gesto
-    if (window.leadgen) window.leadgen.idx = idx;
-    focusOverlayAt(idx);
-
-    // iOS Chrome / WebKit fallback: repetir en el siguiente tick del mismo frame
-    // (algunas builds solo levantan teclado si el focus ocurre tras el default click)
-    setTimeout(()=>focusOverlayAt(idx), 0);
-  }
-
-  // Escuchar en CAPTURA para que no nos bloquee el canvas
-  const OPTS_CAPTURE = { passive: true, capture: true };
-
-  // Orden de intentos:
-  // - touchstart (rápido)
-  // - touchend / pointerup / click (algunos iOS abren teclado solo aquí)
-  window.addEventListener('touchstart', hitTestAndFocus, OPTS_CAPTURE);
-  window.addEventListener('touchend',   hitTestAndFocus, OPTS_CAPTURE);
-  window.addEventListener('pointerdown',hitTestAndFocus, OPTS_CAPTURE);
-  window.addEventListener('pointerup',  hitTestAndFocus, OPTS_CAPTURE);
-  window.addEventListener('mousedown',  hitTestAndFocus, OPTS_CAPTURE);
-  window.addEventListener('click',      hitTestAndFocus, OPTS_CAPTURE);
-
-  // DEBUG: mostrar claramente el overlay input
-  function enableOverlayDebug(){
-    const inp = document.getElementById('leadgen-overlay-input');
-    if (!inp) return;
-    inp.style.opacity = '0.25';
-    inp.style.border  = '1px solid red';
-    inp.style.background = 'rgba(255,0,0,0.08)';
-  }
-  if (DEBUG) {
-    const id = setInterval(()=>{
-      const inp = document.getElementById('leadgen-overlay-input');
-      if (inp){ enableOverlayDebug(); clearInterval(id); }
-    }, 200);
-  }
+  // Arranque
+  requestAnimationFrame(tick);
 })();
