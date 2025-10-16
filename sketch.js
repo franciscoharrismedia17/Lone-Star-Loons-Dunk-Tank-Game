@@ -1,14 +1,194 @@
 // ==================== BILL BALL GAME — Build manual con controles independientes ====================
-// Incluye: Tutorial overlay + Overlay visual de viento (WIND.png) + Leadgen gate (LEADGEN.png / LEADGEN_SUBMIT.png)
-/*
-Atajos:
-- Viento: ←/→ bias, ↑/↓ power, [/] gain, 0 overlay, 9 físico, V ráfagas, D debug
-- Leadgen: TAB/Click cambia de campo, ENTER envía, ESC cierra (solo debug).
+// Integración de AUDIO con p5.sound (sin cambiar lógica ni visuals).
+// Requisitos cubiertos:
+// ✅ Volúmenes y per-clip (AUDIO.master/music/sfx/per).
+// ✅ Gate autoplay mobile (getAudioContext().resume() en primer input).
+// ✅ MAINMUSIC loop en menú/juego; LEVELCOMPLETE con crossfade.
+// ✅ Wind loop con fade-in/out según WIND_ACTIVE (y sin loops duplicados).
+// ✅ SFX: BallThrow, SUCCESS, FAIL, ALMOST, SPLASH, Button (con antispam).
+// ✅ Triggers insertados en puntos pedidos (comentados con // AUDIO: ...).
+
+/* IMPORTANTE (HTML): asegurate de cargar p5.sound
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
 */
 
-const BASE_W = 1920, BASE_H = 1080;
+// ============= AUDIO CONFIG (Editar aquí para ajustar volúmenes globalmente) =============
+const AUDIO = {
+  master: 0.9,   // multiplicador global
+  music:  0.7,   // música (MAINMUSIC, LEVELCOMPLETE)
+  sfx:    0.9,   // efectos (throw, wind, hits, botones)
+  per: {         // overrides por clip (opcional)
+    BallThrow: 1.0,
+    Wind: 0.5,
+    MAINMUSIC: 0.8,
+    LEVELCOMPLETE: 1.0,
+    FAIL: 0.9,
+    ALMOST: 0.9,
+    SPLASH: 1.0,
+    Button: 0.8,
+    SUCCESS: 1.0
+  },
+  fade: {
+    windInMs: 300,
+    windOutMs: 300,
+    crossfadeMs: 600
+  },
+  muteOnStart: false // si true, arranca todo mute (útil para mobile)
+};
+
+// ------------- p5.sound objects -------------
+let SND_BallThrow, SND_Wind, SND_MAINMUSIC, SND_LEVELCOMPLETE, SND_FAIL, SND_ALMOST, SND_SPLASH, SND_Button, SND_SUCCESS;
+// Mapa de conveniencia:
+const CLIPS = {};
+// Estado de música actual (para crossfades)
+let _currentMusic = null;
+// Gate para autoplay
+let _audioUnlocked = false;
+// Antispam por SFX
+const _lastSfxAt = new Map();
+// Wind audio seguimiento de flag
+let _windAudioLast = false;
+
+// ------------- Helpers de audio -------------
+function setClipVolume(name, baseCategory){ // aplica fórmula: master * AUDIO[baseCategory] * (AUDIO.per[name] ?? 1)
+  const base = (baseCategory === 'music') ? AUDIO.music : AUDIO.sfx;
+  const per = (AUDIO.per && typeof AUDIO.per[name] === 'number') ? AUDIO.per[name] : 1.0;
+  const master = AUDIO.master;
+  const mutedFactor = AUDIO.muteOnStart && !_audioUnlocked ? 0 : 1;
+  return constrain(master * base * per * mutedFactor, 0, 1);
+}
+function _getClip(name){
+  return CLIPS[name];
+}
+function applyAudioVolumes(){
+  // Re-aplica los volúmenes actuales (útil si cambiás AUDIO en runtime)
+  const names = Object.keys(CLIPS);
+  for (const n of names){
+    const s = CLIPS[n];
+    if (!s) continue;
+    // Detectar categoría base:
+    const cat = (n === 'MAINMUSIC' || n === 'LEVELCOMPLETE') ? 'music' : 'sfx';
+    const vol = setClipVolume(n, cat);
+    s.setVolume(vol, 0.05); // suave
+  }
+}
+
+function playSfx(name){
+  const s = _getClip(name);
+  if (!s) return;
+
+  // Antispam: throttle por nombre
+  const now = millis ? millis() : performance.now();
+  const throttleMs = (name === 'Button') ? 120 : 60;
+  const last = _lastSfxAt.get(name) || -1e9;
+  if (now - last < throttleMs) return;
+  _lastSfxAt.set(name, now);
+
+  const vol = setClipVolume(name, 'sfx');
+  s.stop(); // asegurar arranque limpio
+  s.setVolume(vol, 0);
+  s.play();
+}
+
+function playLoop(name, fadeInMs = AUDIO.fade.windInMs){
+  const s = _getClip(name);
+  if (!s) return;
+  const target = setClipVolume(name, 'sfx');
+  if (!s.isPlaying()){
+    s.setLoop(true);
+    s.setVolume(0, 0);
+    s.play();
+  }
+  s.setVolume(target, (fadeInMs||0)/1000);
+}
+function stopLoop(name, fadeOutMs = AUDIO.fade.windOutMs){
+  const s = _getClip(name);
+  if (!s) return;
+  const stopDelay = (fadeOutMs||0);
+  s.setVolume(0, stopDelay/1000);
+  // Detener tras el fade
+  setTimeout(()=>{ if (s && s.isPlaying()) s.stop(); }, stopDelay + 10);
+}
+
+function playMusic(name){
+  // Inicia música (loop para MAINMUSIC, one-shot para LEVELCOMPLETE) sin crossfade (si nada sonando)
+  const s = _getClip(name);
+  if (!s) return;
+  const vol = setClipVolume(name, 'music');
+
+  if (_currentMusic === name && s.isPlaying()) {
+    // evitar duplicados
+    s.setVolume(vol, 0.2);
+    return;
+  }
+  if (_currentMusic && _currentMusic !== name){
+    // Si había otra, usar crossfade
+    crossfadeTo(name);
+    return;
+  }
+  // Arranque directo
+  s.stop();
+  s.setLoop(name === 'MAINMUSIC');
+  s.setVolume(vol, 0);
+  s.play();
+  _currentMusic = name;
+}
+
+function crossfadeTo(name){
+  const to = _getClip(name);
+  if (!to) return;
+  const fromName = _currentMusic;
+  const from = fromName ? _getClip(fromName) : null;
+  const ms = AUDIO.fade.crossfadeMs || 600;
+
+  // Config destino:
+  const toVol = setClipVolume(name, 'music');
+  to.setLoop(name === 'MAINMUSIC'); // MAINMUSIC loop; LEVELCOMPLETE no
+  if (!to.isPlaying()){
+    to.setVolume(0, 0);
+    to.play();
+  }
+  to.setVolume(toVol, ms/1000);
+
+  if (from && from.isPlaying()){
+    from.setVolume(0, ms/1000);
+    setTimeout(()=>{ if (from.isPlaying()) from.stop(); }, ms + 20);
+  }
+  _currentMusic = name;
+}
+
+function resumeAudioIfNeeded(){
+  try{
+    const ac = getAudioContext();
+    if (ac && ac.state !== 'running') {
+      ac.resume();
+    }
+    _audioUnlocked = true;
+    applyAudioVolumes();
+  }catch(e){}
+}
+
+function ensureWindLoopFromFlag(){
+  if (_windAudioLast !== (!!WIND_ACTIVE)){
+    if (WIND_ACTIVE){
+      playLoop('Wind', AUDIO.fade.windInMs);
+    } else {
+      stopLoop('Wind', AUDIO.fade.windOutMs);
+    }
+    _windAudioLast = !!WIND_ACTIVE;
+  }
+}
+
+function _uiClickSound(){
+  playSfx('Button');
+}
+
+// ================== (FIN AUDIO) ==================
+
 
 // ================== CONFIGURACIÓN MANUAL ==================
+const BASE_W = 1920, BASE_H = 1080;
 const CFG = {
   // --- HITBOX del objetivo (independiente del TANK) ---
   HITBOX: { x:1466, y:600, radius:50, shrink:1.50, debug:false },
@@ -122,7 +302,7 @@ function endViewport(){ pop(); }
 function screenToWorld(pt){ const v=getViewport(); return { x:(pt.x-v.x)/v.s, y:(pt.y-v.y)/v.s }; }
 function fitToScreenNow(){ let w=window.innerWidth,h=window.innerHeight; if (window.visualViewport){ w=Math.floor(window.visualViewport.width); h=Math.floor(window.visualViewport.height);} resizeCanvas(w,h); }
 
-// ---------- Assets ----------
+// ---------- Assets (IMÁGENES / FUENTE) ----------
 let IMG_BG, IMG_TANK;
 let IMG_ENEMY_L1, IMG_ENEMY_L2, IMG_ENEMY_L3;
 let IMG_BILL_REST, IMG_BILL_RISE, IMG_BILL_THROW;
@@ -132,9 +312,6 @@ let IMG_WIND;              // overlay de viento
 let IMG_LEADGEN_HDR;       // LEADGEN.png (título)
 let IMG_LEADGEN_SUBMIT;    // LEADGEN_SUBMIT.png (botón)
 let FONT_MAIN = null;
-
-// ---------- Audio (opcional) ----------
-let SND_THROW=null, SND_BUTTON=null, SND_WIND=null, SND_HIT_WEAK=null, SND_HIT_STRONG=null, SND_LEVEL_COMPLETE=null, SND_TIMEOUT=null;
 
 // ---------- Personaje ----------
 const POSE = { REST:'REST', RISE:'RISE', THROW:'THROW' };
@@ -161,11 +338,16 @@ let levelStartAt = 0, levelEndReason = '';
 let currentLevelIndex = 0;
 let lastCompletedLevel = -1;
 
+// ---------- Sistema de aciertos por nivel ----------
+const HITS_REQUIRED_BY_LEVEL = [3, 2, 1]; // L1→3, L2→2, L3→1
+let hitsThisLevel = 0;
+function getRequiredHits(){ return HITS_REQUIRED_BY_LEVEL[currentLevelIndex] || 1; }
+
 // ---------- Niveles ----------
 const LEVELS = [
-  { name:'Level 1', durationSec:60, enemyDrop:160, windPower:1.7, windBias:-0.9, windGain:1.0 },
-  { name:'Level 2', durationSec:30, enemyDrop:200, windPower:1.9, windBias:-1.5, windGain:1.1 },
-  { name:'Level 3', durationSec:10, enemyDrop:240, windPower:2.5, windBias:-1.9, windGain:1.2 }
+  { name:'Level 1', durationSec:60, enemyDrop:180, windPower:1.7, windBias:-0.9, windGain:1.0 },
+  { name:'Level 2', durationSec:30, enemyDrop:180, windPower:1.9, windBias:-1.5, windGain:1.1 },
+  { name:'Level 3', durationSec:10, enemyDrop:180, windPower:2.5, windBias:-1.9, windGain:1.2 }
 ];
 
 // ---------- Loop / Timing ----------
@@ -190,8 +372,26 @@ let COLLISION_SHRINK = CFG.HITBOX.shrink;
 // ---------- Power Bar ----------
 let powerBar = { active:false, value:0, t:0, dur:1200 };
 
-// ---------- Enemy ----------
-let enemy = { img:null, drawW:0, drawH:0, baseX:CFG.ENEMY.x, baseY:BASE_H-CFG.ENEMY.marginBottom, yOffset:0, dropPixels:160, falling:false, fallen:false, fallSpeed:360 };
+// ---------- Enemy (con FSM de bajada/subida por golpe) ----------
+/*
+Estados:
+- 'idle'        : arriba, listo para recibir golpe.
+- 'stepDown'    : baja unos píxeles tras un golpe (intermedio).
+- 'rise'        : vuelve a subir hasta arriba; durante rise no cuenta golpes.
+- 'finalDown'   : bajada final hasta el fondo en el último golpe.
+- 'down'        : queda abajo (se mostrará el Level Complete).
+*/
+let enemy = {
+  img:null, drawW:0, drawH:0,
+  baseX:CFG.ENEMY.x, baseY:BASE_H-CFG.ENEMY.marginBottom,
+  yOffset:0, dropPixels:160,
+  state:'idle',
+  targetOffset:0,
+  downSpeed:420, // px/s
+  upSpeed:520,   // px/s
+  // compat con código previo (no usados ahora para animar):
+  falling:false, fallen:false, fallSpeed:360
+};
 
 // ---------- Pelota ----------
 let balls = [];
@@ -221,8 +421,9 @@ let leadgen = {
   _submitRect:null
 };
 
-// ---------- Preload ----------
+// ---------- Preload (IMAGEN + SONIDO) ----------
 function preload(){
+  // ---- imágenes
   IMG_BG   = loadImage('ALL LEVELS_BACKGROUND.png');
   IMG_TANK = loadImage('TANK.png');
 
@@ -252,6 +453,29 @@ function preload(){
   IMG_LEADGEN_SUBMIT = loadImage('LEADGEN_SUBMIT.png'); // botón enviar
 
   FONT_MAIN = loadFont('TheThreeStoogesFont.ttf');
+
+  // ---- audio
+  if (typeof soundFormats === 'function') soundFormats('mp3', 'wav');
+  SND_BallThrow     = loadSound('BallThrow.mp3');
+  SND_Wind          = loadSound('Wind.wav');
+  SND_MAINMUSIC     = loadSound('MAINMUSIC.mp3');
+  SND_LEVELCOMPLETE = loadSound('LEVELCOMPLETE.mp3');
+  SND_FAIL          = loadSound('FAIL.wav');
+  SND_ALMOST        = loadSound('ALMOST.wav');
+  SND_SPLASH        = loadSound('SPLASH.wav');
+  SND_Button        = loadSound('Button.wav');
+  SND_SUCCESS       = loadSound('SUCCESS.wav');
+
+  // Mapa
+  CLIPS.BallThrow     = SND_BallThrow;
+  CLIPS.Wind          = SND_Wind;
+  CLIPS.MAINMUSIC     = SND_MAINMUSIC;
+  CLIPS.LEVELCOMPLETE = SND_LEVELCOMPLETE;
+  CLIPS.FAIL          = SND_FAIL;
+  CLIPS.ALMOST        = SND_ALMOST;
+  CLIPS.SPLASH        = SND_SPLASH;
+  CLIPS.Button        = SND_Button;
+  CLIPS.SUCCESS       = SND_SUCCESS;
 }
 
 // ---------- Setup ----------
@@ -280,7 +504,10 @@ function setup(){
     leadgen.data.email = localStorage.getItem('leadgen_email') || '';
   }
 
-  goToMenu();
+  // Inicializar volúmenes (mute si corresponde)
+  applyAudioVolumes();
+
+  goToMenu(); // AUDIO: play MAINMUSIC en menú dentro de goToMenu()
 }
 function windowResized(){ fitToScreenNow(); }
 
@@ -290,6 +517,9 @@ function goToMenu(){
   menu.btn = {x:0,y:0,w:0,h:0,pressed:false};
   currentLevelIndex = 0;
   lastCompletedLevel = -1;
+
+  // AUDIO: música principal en loop en el menú (evita duplicados)
+  playMusic('MAINMUSIC');
 }
 
 function renderMenu(){
@@ -334,7 +564,12 @@ function applyLevelConfig(idx){
   enemy.baseX = CFG.ENEMY.x;
   enemy.baseY = BASE_H - CFG.ENEMY.marginBottom;
   enemy.dropPixels = L.enemyDrop;
-  enemy.yOffset = 0; enemy.falling = false; enemy.fallen = false;
+
+  // Reset FSM
+  enemy.yOffset = 0;
+  enemy.state = 'idle';
+  enemy.targetOffset = 0;
+  enemy.falling = false; enemy.fallen = false;
 
   if (IMG_TANK) {
     TANK_DRAW_W = IMG_TANK.width  * CFG.TANK.scale;
@@ -359,25 +594,54 @@ function startLevel(){
   tutorial.t = 0;
   tutorial.startMs = tutorial.active ? millis() : 0;
 
+  // Reset de contadores de aciertos
+  hitsThisLevel = 0;
+
   levelStartAt = millis();          // se corrige si hay tutorial
   levelEndReason = '';
   overlay = { active:false, t:0, dur:600 };
   gameState = GAME.PLAY;
 
   if (typeof hardReset === 'function'){ hardReset(true); } // protección si no existe
+
+  // AUDIO: asegurar que si veníamos de LEVELCOMPLETE, vuelva la MAINMUSIC (crossfade si aplica)
+  playMusic('MAINMUSIC');
 }
 
 function endLevel(reason){
+  // Evita doble finalización
+  if (gameState === GAME.LEVEL_END) return;
+
   if (reason && /complete/i.test(reason)) lastCompletedLevel = currentLevelIndex;
   gameState = GAME.LEVEL_END;
   overlay.active = true; overlay.t = 0;
   levelEndReason = reason || 'Level complete!';
-  if (reason && /complete/i.test(reason) && SND_LEVEL_COMPLETE && SND_LEVEL_COMPLETE.play) SND_LEVEL_COMPLETE.play();
-  if (reason && /time/i.test(reason) && SND_TIMEOUT && SND_TIMEOUT.play) SND_TIMEOUT.play();
+
+  // AUDIO: crossfade a LEVELCOMPLETE si reason=complete
+  if (reason && /complete/i.test(reason)){
+    crossfadeTo('LEVELCOMPLETE'); // no loop
+  }
+
+  // Desactivar bolas activas para que no se registren nuevos golpes durante el overlay
+  for (const b of balls){ b.active = false; }
 }
 
-function goToNextScreen(){ if (currentLevelIndex < LEVELS.length - 1){ currentLevelIndex++; restartLevel(); } else { goToMenu(); } }
-function restartLevel(){ startLevel(); }
+function goToNextScreen(){
+  // AUDIO: al pasar a siguiente, volver a MAINMUSIC
+  crossfadeTo('MAINMUSIC');
+
+  if (currentLevelIndex < LEVELS.length - 1){
+    currentLevelIndex++;
+    startLevel(); // reinicia y resetea aciertos
+  } else {
+    goToMenu();
+  }
+}
+function restartLevel(){
+  // AUDIO: al reiniciar, asegurar MAINMUSIC
+  crossfadeTo('MAINMUSIC');
+  startLevel();
+}
 
 // ---------- Draw loop ----------
 let overlay = { active:false, t:0, dur:600 };
@@ -395,6 +659,9 @@ function draw(){
     else if (gameState === GAME.LEVEL_END) updateOverlay(dt);
   }
   render();
+
+  // AUDIO: sync del loop de viento con el flag (cubre toggles por tecla y gusts)
+  ensureWindLoopFromFlag();
 }
 
 function update(dt){
@@ -405,7 +672,7 @@ function update(dt){
 
   updateWindGusts(now, dt);
   updateBalls(dt);
-  updateEnemy(dt);
+  updateEnemyFSM(dt);
   updateFx(dt);
   updateTimerAndCheckEnd();
 
@@ -425,15 +692,88 @@ function update(dt){
 
   if (tutorial.active) tutorial.t += dt;
 }
-function updateEnemy(dt){
-  // Lógica mínima: si está cayendo, avanzar caída; marcar "fallen" al terminar
-  if (enemy.falling && !enemy.fallen){
-    enemy.yOffset += enemy.fallSpeed * (dt); // dt ya viene en segundos
-    if (enemy.yOffset >= enemy.dropPixels){
-      enemy.yOffset = enemy.dropPixels;
-      enemy.falling = false;
-      enemy.fallen  = true;
+
+// ===================== ENEMY: lógica de bajar/subir por golpe =====================
+function canRegisterHit(){
+  // Solo cuenta golpes cuando el enemigo está listo (arriba y quieto)
+  return gameState === GAME.PLAY && enemy.state === 'idle';
+}
+function perHitStepPixels(){
+  const req = Math.max(1, getRequiredHits());
+  return enemy.dropPixels / req;
+}
+function onSuccessfulHit(){
+  // Si el enemigo está moviéndose, ignoramos el golpe (hay que esperar a que suba)
+  if (!canRegisterHit()) return;
+
+  const req = getRequiredHits();
+  const nextHits = hitsThisLevel + 1;
+
+  if (nextHits < req){
+    // Golpe intermedio: baja un paso y luego sube
+    hitsThisLevel = nextHits;
+    enemy.targetOffset = Math.min(perHitStepPixels() * hitsThisLevel, enemy.dropPixels - 1);
+    enemy.state = 'stepDown';
+
+    // AUDIO: enemigo baja parcialmente (ALMOST)
+    playSfx('ALMOST');
+  } else {
+    // Último golpe: baja hasta el fondo y se queda
+    hitsThisLevel = nextHits;
+    enemy.targetOffset = enemy.dropPixels;
+    enemy.state = 'finalDown';
+
+    // AUDIO: bajada definitiva (SPLASH) — corto, antes del crossfade a LEVELCOMPLETE
+    playSfx('SPLASH');
+  }
+
+  // Limpiamos bolas activas para evitar doble registro durante la animación
+  for (const b of balls){ b.active = false; }
+}
+function updateEnemyFSM(dt){
+  switch (enemy.state){
+    case 'idle':
+      // arriba, nada que hacer
+      break;
+
+    case 'stepDown': {
+      const dir = Math.sign(enemy.targetOffset - enemy.yOffset);
+      enemy.yOffset += dir * enemy.downSpeed * dt;
+      if ((dir >= 0 && enemy.yOffset >= enemy.targetOffset) ||
+          (dir <= 0 && enemy.yOffset <= enemy.targetOffset)) {
+        enemy.yOffset = enemy.targetOffset;
+        enemy.state = 'rise';
+      }
+      break;
     }
+
+    case 'rise': {
+      const dir = Math.sign(0 - enemy.yOffset);
+      enemy.yOffset += dir * enemy.upSpeed * dt;
+      if ((dir >= 0 && enemy.yOffset >= 0) ||
+          (dir <= 0 && enemy.yOffset <= 0)) {
+        enemy.yOffset = 0;
+        enemy.state = 'idle'; // ahora vuelve a contar golpes
+      }
+      break;
+    }
+
+    case 'finalDown': {
+      const dir = Math.sign(enemy.targetOffset - enemy.yOffset);
+      enemy.yOffset += dir * enemy.downSpeed * dt;
+      if ((dir >= 0 && enemy.yOffset >= enemy.targetOffset) ||
+          (dir <= 0 && enemy.yOffset <= enemy.targetOffset)) {
+        enemy.yOffset = enemy.targetOffset;
+        enemy.state = 'down';
+        // Termina el nivel cuando llegó abajo (mantiene compatibilidad con overlay/sonidos)
+        endLevel('complete');
+      }
+      break;
+    }
+
+    case 'down':
+      // Quieto abajo hasta que aparezca el overlay
+      break;
   }
 }
 
@@ -454,7 +794,8 @@ function updateWindGusts(now, dt){
     const was = WIND_ACTIVE; WIND_ACTIVE = !WIND_ACTIVE;
     const range = WIND_ACTIVE ? gust.durOn : gust.durOff;
     const dur = random(range[0], range[1]); gust.next = now + dur;
-    if (!was && WIND_ACTIVE && CFG.WIND.enabled && SND_WIND && SND_WIND.play) SND_WIND.play();
+
+    // AUDIO: el loop/stop del viento se gestiona en ensureWindLoopFromFlag(), llamado cada frame.
   }
   const target = (CFG.WIND.enabled && WIND_ACTIVE) ? 1 : 0;
   const k = WIND_VIS_FADE_S * dt;
@@ -463,7 +804,10 @@ function updateWindGusts(now, dt){
 
 function updateTimerAndCheckEnd(){
   const remain = Math.max(0, LEVEL_TIME_MS - (millis() - levelStartAt));
-  if (remain === 0){ if (!enemy.fallen) endLevel("Time's up"); }
+  // Si se terminó el tiempo, SIEMPRE terminamos nivel (sin depender de caída)
+  if (gameState === GAME.PLAY && remain === 0){
+    endLevel("Time's up");
+  }
 }
 
 // ---------- Render ----------
@@ -521,6 +865,8 @@ function drawTank(){ if (!IMG_TANK) return; imageMode(CENTER); image(IMG_TANK, T
 
 // ---------- Input ----------
 function keyPressed(){
+  resumeAudioIfNeeded(); // AUDIO: gate en primer input
+
   // Leadgen captura todas las teclas
   if (gameState === GAME.LEADGEN){ handleLeadgenKeyPressed(); return; }
 
@@ -545,9 +891,11 @@ function keyPressed(){
 function keyTyped(){ if (gameState === GAME.LEADGEN){ handleLeadgenKeyTyped(); return; } }
 
 function mousePressed(){
+  resumeAudioIfNeeded(); // AUDIO: gate en primer input
+
   if (gameState===GAME.MENU){
     const b=menu.btn;
-    if (mouseX>=b.x && mouseX<=b.x+b.w && mouseY>=b.y && mouseY<=b.y+b.h) b.pressed = true;
+    if (mouseX>=b.x && mouseX<=b.x+b.w && mouseY>=b.y&&mouseY<=b.y+b.h) b.pressed = true;
     return;
   }
   if (gameState===GAME.LEVEL_END){ if (handleOverlayTapAt(mouseX, mouseY)) return; }
@@ -559,11 +907,15 @@ function mousePressed(){
   beginHold();
 }
 function mouseReleased(){
+  resumeAudioIfNeeded(); // AUDIO: gate en primer input
+
   if (gameState===GAME.MENU){
     const b=menu.btn;
-    const inside = mouseX>=b.x && mouseX<=b.x+b.w && mouseY>=b.y && mouseY<=b.y+b.h;
+    const inside = mouseX>=b.x && mouseX<=b.x+b.w && mouseY>=b.y&&mouseY<=b.y+b.h;
     const wasPressed=b.pressed; b.pressed=false;
     if (wasPressed && inside){
+      _uiClickSound(); // AUDIO: Button en menú start
+
       if (CFG.LEADGEN.enabled){
         // En lugar de arrancar nivel → abrir Leadgen
         leadgen.active = true;
@@ -578,6 +930,8 @@ function mouseReleased(){
   endHold();
 }
 function touchStarted(){
+  resumeAudioIfNeeded(); // AUDIO: gate en primer input
+
   if (gameState === GAME.LEADGEN){ handleLeadgenMouse(); return false; }
   if (tutorial.active){ tutorialDismiss(); return false; }
   beginHold();
@@ -704,6 +1058,7 @@ function handleLeadgenMouse(){
       if (m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h) {
         leadgen.idx = i;
         leadgen.message = '';
+        _uiClickSound(); // AUDIO: Button al enfocar input
         return;
       }
     }
@@ -712,6 +1067,7 @@ function handleLeadgenMouse(){
   if (leadgen._submitRect) {
     const r = leadgen._submitRect;
     if (m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h) {
+      _uiClickSound(); // AUDIO: Button submit
       leadgenSubmit();
       return;
     }
@@ -723,11 +1079,13 @@ function handleLeadgenKeyPressed(){
   if (!leadgen.active) return;
 
   if (keyCode === TAB){
+    _uiClickSound(); // AUDIO: Button (navegación de inputs)
     leadgen.idx = (leadgen.idx + 1) % CFG.LEADGEN.fields.length;
     leadgen.message = '';
     return;
   }
   if (keyCode === ENTER){
+    _uiClickSound(); // AUDIO: Button (submit via teclado)
     leadgenSubmit();
     return;
   }
@@ -899,6 +1257,11 @@ function drawHUD(){
   if (currentLevelIndex === 2 && IMG_SCORE_L3 && CFG.SCORE.hud.level3.visible) {
     const cfg = CFG.SCORE.hud.level3; const w = IMG_SCORE_L3.width * cfg.scale, h = IMG_SCORE_L3.height * cfg.scale; image(IMG_SCORE_L3, cfg.x, cfg.y, w, h);
   }
+
+  // (Opcional) — Si querés visualizar aciertos: descomenta
+  // push(); fill(255); textAlign(LEFT, TOP); textSize(24);
+  // text(`Hits: ${hitsThisLevel}/${getRequiredHits()}`, SCOREBOARD_X, SCOREBOARD_Y + 120);
+  // pop();
 }
 
 // Barra de energía
@@ -931,6 +1294,10 @@ function endHold(){
   const now = millis();
   if (now - lastThrowAt < THROW_COOLDOWN_MS){ currentPose = POSE.REST; return; }
   currentPose = POSE.THROW; lastThrowAt = now;
+
+  // AUDIO: BallThrow al pasar a POSE.THROW
+  playSfx('BallThrow');
+
   const aimScreen = getPointerScreen(); const aimBase = screenToWorld(aimScreen); spawnBall(aimBase);
   throwEndAt = now + THROW_HOLD_MS;
 }
@@ -942,7 +1309,9 @@ function drawLevelEndOverlay(){
   noStroke(); fill(0,0,0, 140*ease); rect(0,0,BASE_W,BASE_H);
   push(); translate(0, y - yEnd);
   noStroke(); fill(25,22,30,230); rect(x, yEnd, panelW, panelH, 18);
-  fill(255); textAlign(CENTER,TOP); if (FONT_MAIN) textFont(FONT_MAIN); textSize(44); text('Level Complete', x+panelW/2, yEnd+28);
+  // Título segun motivo
+  const title = /time/i.test(levelEndReason) ? 'Time\'s Up' : 'Level Complete';
+  fill(255); textAlign(CENTER,TOP); if (FONT_MAIN) textFont(FONT_MAIN); textSize(44); text(title, x+panelW/2, yEnd+28);
   const isMobile = windowWidth < 900; const bw = isMobile ? 320 : 240; const bh = isMobile ? 90 : 60; const gap = isMobile ? 40 : 24; const btnY = yEnd + panelH - 86;
   const rx = x + panelW/2 - bw - gap/2; drawButton(rx, btnY, bw, bh, (currentLevelIndex===0?'Restart':'Retry')); overlayButtons.restart = {x:rx, y:btnY, w:bw, h:bh};
   const nx = x + panelW/2 + gap/2; drawButton(nx, btnY, bw, bh, (currentLevelIndex<LEVELS.length-1?'Next':'Menu')); overlayButtons.next = {x:nx, y:btnY, w:bw, h:bh};
@@ -957,8 +1326,14 @@ function drawButton(x,y,w,h,label){ noStroke(); fill(60,60,70,240); rect(x,y,w,h
 function handleOverlayTapAt(screenX, screenY){
   const m=screenToWorld({x:screenX,y:screenY});
   const inside=(b)=> m.x>=b.x&&m.x<=b.x+b.w&&m.y>=b.y&&m.y<=b.y+b.h;
-  if (inside(overlayButtons.next)){ goToNextScreen(); return true; }
-  if (inside(overlayButtons.restart)){ restartLevel(); return true; }
+  if (inside(overlayButtons.next)){
+    _uiClickSound(); // AUDIO: Button en Next/Menu
+    goToNextScreen(); return true;
+  }
+  if (inside(overlayButtons.restart)){
+    _uiClickSound(); // AUDIO: Button en Retry/Restart
+    restartLevel(); return true;
+  }
   return false;
 }
 
@@ -997,6 +1372,7 @@ function spawnBall(aimPointBase=null){
   balls.push(ball);
 }
 
+// ---------- Golpe exitoso: detección y gating mientras sube ----------
 function updateBalls(dt){
   for (let i=balls.length-1; i>=0; --i){
     const b=balls[i];
@@ -1019,12 +1395,27 @@ function updateBalls(dt){
         const gamma = (CFG.POWERBAR && CFG.POWERBAR.gamma) || 1.0;
         powerBar.active = true; powerBar.value = Math.pow(rawPow, 1/gamma); powerBar.t = 0;
         hitFx = {active:true, x:TARGET.x, y:TARGET.y, t:0, dur:600};
-        if (b.impactSpeed >= impactThreshold){ enemy.falling = true; SND_HIT_STRONG && SND_HIT_STRONG.play && SND_HIT_STRONG.play(); }
-        else { SND_HIT_WEAK && SND_HIT_WEAK.play && SND_HIT_WEAK.play(); }
+
+        const strong = b.impactSpeed >= impactThreshold;
+        if (strong){
+          // AUDIO: impacto fuerte (SUCCESS)
+          playSfx('SUCCESS');
+
+          // Solo contar si el enemigo está listo (idle).
+          if (canRegisterHit()) onSuccessfulHit();
+        } else {
+          // AUDIO: impacto débil (FAIL)
+          playSfx('FAIL');
+        }
+
+        // Clavar bola breve y remover
         b.stuck = true; b.vx = b.vy = 0; b.stickStart = millis();
       }
+
       if (b.x < -120 || b.x > BASE_W+120 || b.y < -120 || b.y > BASE_H+120) b.active = false;
-    } else { if (millis() - b.stickStart > 600) b.active = false; }
+    } else {
+      if (millis() - b.stickStart > 600) b.active = false;
+    }
   }
 }
 
