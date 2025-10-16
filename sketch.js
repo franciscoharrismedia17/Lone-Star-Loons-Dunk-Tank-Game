@@ -1843,127 +1843,140 @@ function _blurLeadgen(){
 }
 
 
-/* ==== LEADGEN MODAL FULLSCREEN (teclado garantizado en iOS/Android) ==== */
+/* ==== LEADGEN TAKEOVER FULLPAGE — SOLO EN MOBILE ==== */
 (function(){
-  const Z = 2147483600;
-  const FONT_SIZE = '16px'; // evita zoom iOS
-  let modal, form, firstI, lastI, emailI, submitB, cancelB, msg;
+  function isMobile(){
+    const ua = navigator.userAgent || '';
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const android = /Android/.test(ua);
+    // consideramos "mobile" si iOS o Android y pantalla angosta
+    const smallScreen = Math.min(window.innerWidth, window.innerHeight) <= 900;
+    return isTouch && (iOS || android) && smallScreen;
+  }
+  if (!isMobile()) return; // <-- solo se activa en mobile
 
-  function ensureModal(){
-    if (modal) return modal;
-    modal = document.createElement('div');
-    modal.id = 'leadgen-modal';
-    Object.assign(modal.style, {
-      position:'fixed', left:0, top:0, width:'100vw', height:'100vh',
-      zIndex:String(Z), background:'rgba(0,0,0,0.6)',
-      display:'none', alignItems:'center', justifyContent:'center'
+  const Z = 2147483900;
+  const FONT = '-apple-system, system-ui, Segoe UI, Roboto, Ubuntu, sans-serif';
+  let root = null, form = null, firstI, lastI, emailI, goBtn, cancelBtn, msg;
+  let canvasEl = null, wasHidden = false;
+
+  function ensureCanvasRef(){
+    if (!canvasEl){
+      canvasEl = document.querySelector('canvas');
+    }
+  }
+
+  function ensureUI(){
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'leadgen-takeover';
+    Object.assign(root.style, {
+      position:'fixed', inset:'0', zIndex:String(Z),
+      background:'#0f0f10', color:'#fff', display:'none',
+      overflow:'auto'
     });
 
     const box = document.createElement('div');
     Object.assign(box.style, {
-      width:'min(520px, 92vw)', borderRadius:'14px', padding:'18px 16px',
-      background:'#111', color:'#fff', fontFamily:'-apple-system,system-ui,Segoe UI,Roboto,Ubuntu,sans-serif',
-      boxShadow:'0 12px 32px rgba(0,0,0,0.35)'
+      maxWidth:'560px', margin:'min(12vh,80px) auto', padding:'20px 16px 28px',
+      fontFamily:FONT
     });
 
-    const h = document.createElement('div');
-    h.textContent = 'Completar datos';
-    Object.assign(h.style, {fontWeight:'700', marginBottom:'10px', fontSize:'18px'});
+    const title = document.createElement('div');
+    title.textContent = 'Continuemos con tus datos';
+    Object.assign(title.style, {fontSize:'20px', fontWeight:'700', marginBottom:'12px'});
+
     msg = document.createElement('div');
-    Object.assign(msg.style, {fontSize:'14px', opacity:'0.85', marginBottom:'12px'});
-    msg.textContent = 'Ingresá tu nombre y email para continuar.';
+    msg.textContent = 'Completá el formulario para seguir jugando.';
+    Object.assign(msg.style, {fontSize:'14px', opacity:'0.9', marginBottom:'16px'});
 
-    form = document.createElement('form');
-    form.autocomplete = 'on';
-    form.noValidate = true;
+    form = document.createElement('form'); form.autocomplete='on'; form.noValidate=true;
 
-    function mkField(labelText, type, name, autocomplete){
+    function field(label, name, type, ac){
       const wrap = document.createElement('label');
-      Object.assign(wrap.style, {display:'block', margin:'10px 0'});
-      const lab = document.createElement('div');
-      lab.textContent = labelText;
-      Object.assign(lab.style, {fontSize:'13px', opacity:'0.9', marginBottom:'6px'});
-      const inp = document.createElement('input');
-      Object.assign(inp.style, {
-        width:'100%', height:'40px', borderRadius:'10px', border:'1px solid #2b2b2b',
-        background:'#1a1a1a', color:'#fff', padding:'0 12px', outline:'none', fontSize:FONT_SIZE
+      Object.assign(wrap.style, {display:'block', margin:'12px 0'});
+      const l = document.createElement('div'); l.textContent = label;
+      Object.assign(l.style, {fontSize:'13px', opacity:'0.9', marginBottom:'6px'});
+      const i = document.createElement('input');
+      Object.assign(i.style, {
+        width:'100%', height:'44px', borderRadius:'12px', border:'1px solid #2c2c2e',
+        background:'#171718', color:'#fff', padding:'0 12px', outline:'none', fontSize:'16px'
       });
-      inp.type = type; inp.name = name; inp.autocomplete = autocomplete; inp.inputMode = (type==='email'?'email':'text');
-      wrap.appendChild(lab); wrap.appendChild(inp);
-      return {wrap, inp};
+      i.name=name; i.type=type; i.inputMode=(type==='email'?'email':'text'); i.autocomplete=ac;
+      wrap.appendChild(l); wrap.appendChild(i);
+      return {wrap, inp:i};
     }
 
-    const f1 = mkField('Nombre', 'text', 'first', 'given-name');
-    const f2 = mkField('Apellido', 'text', 'last', 'family-name');
-    const f3 = mkField('Email', 'email', 'email', 'email');
-    firstI = f1.inp; lastI = f2.inp; emailI = f3.inp;
+    const f1 = field('Nombre',  'first', 'text',  'given-name');
+    const f2 = field('Apellido','last',  'text',  'family-name');
+    const f3 = field('Email',   'email', 'email', 'email');
+    firstI = f1.inp; lastI  = f2.inp; emailI = f3.inp;
 
     const row = document.createElement('div');
-    Object.assign(row.style, {display:'flex', gap:'10px', marginTop:'12px'});
-    submitB = document.createElement('button'); submitB.type='submit'; submitB.textContent='Continuar';
-    cancelB = document.createElement('button'); cancelB.type='button'; cancelB.textContent='Cancelar';
-    for (const b of [submitB, cancelB]){
+    Object.assign(row.style, {display:'flex', gap:'10px', marginTop:'16px'});
+    const makeBtn = (label, primary)=>{
+      const b = document.createElement('button');
+      b.type = primary ? 'submit' : 'button';
+      b.textContent = label;
       Object.assign(b.style, {
-        flex:'1 1 0', height:'40px', borderRadius:'10px', border:'1px solid #2b2b2b',
-        background: b===submitB ? '#1266f1' : '#2b2b2b', color:'#fff', fontWeight:'600', fontSize:'15px'
+        flex:'1 1 0', height:'44px', borderRadius:'12px', border:'1px solid #2c2c2e',
+        background: primary ? '#0a84ff' : 'transparent', color:'#fff', fontWeight:'600', fontSize:'15px'
       });
-    }
-    row.appendChild(submitB); row.appendChild(cancelB);
+      return b;
+    };
+    const submitBtn = makeBtn('Continuar', true);
+    const cancelBtn = makeBtn('Cancelar', false);
+    row.appendChild(submitBtn); row.appendChild(cancelBtn);
 
     form.appendChild(f1.wrap); form.appendChild(f2.wrap); form.appendChild(f3.wrap);
-    box.appendChild(h); box.appendChild(msg); box.appendChild(form); box.appendChild(row);
-    modal.appendChild(box);
-    document.body.appendChild(modal);
+    box.appendChild(title); box.appendChild(msg); box.appendChild(form); box.appendChild(row);
+    root.appendChild(box);
+    document.body.appendChild(root);
 
-    // Comportamiento
-    cancelB.addEventListener('click', ()=>{ hideModal(); });
+    // behavior
+    cancelBtn.addEventListener('click', hide);
     form.addEventListener('submit', (ev)=>{
       ev.preventDefault();
       try {
         if (!window.leadgen) window.leadgen = {data:{}, errors:{}};
-        leadgen.data.first = String(firstI.value||'').trim();
-        leadgen.data.last  = String(lastI.value||'').trim();
-        leadgen.data.email = String(emailI.value||'').trim();
-        // Validación mínima
+        const d = leadgen.data;
+        d.first = (firstI.value||'').trim();
+        d.last  = (lastI.value||'').trim();
+        d.email = (emailI.value||'').trim();
         const bad = {};
-        if (!leadgen.data.first) bad.first = true;
-        if (!leadgen.data.last)  bad.last = true;
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadgen.data.email||'')) bad.email = true;
+        if (!d.first) bad.first=true;
+        if (!d.last)  bad.last=true;
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email||'')) bad.email=true;
+        msg.style.color = Object.keys(bad).length ? '#ff6767' : '#9eff8a';
+        msg.textContent = Object.keys(bad).length ? 'Revisá los campos marcados.' : '¡Gracias!';
+        [ ['first',firstI], ['last',lastI], ['email',emailI] ].forEach(([k,inp])=>{
+          inp.style.borderColor = bad[k] ? '#ff6767' : '#2c2c2e';
+        });
         if (Object.keys(bad).length){
-          msg.textContent = 'Revisá los campos marcados.';
-          msg.style.color = '#ff6767';
-          [ ['first',firstI], ['last',lastI], ['email',emailI] ].forEach(([k,inp])=>{
-            inp.style.borderColor = bad[k] ? '#ff6767' : '#2b2b2b';
-          });
           (bad.first && firstI.focus()) || (bad.last && lastI.focus()) || (bad.email && emailI.focus());
           return;
         }
-        // reflejar en tu estado
         if (!leadgen.errors) leadgen.errors = {};
-        leadgen.errors.first = false; leadgen.errors.last = false; leadgen.errors.email = false;
-        leadgen.message = 'Thanks! Loading…';
-        // Persistir si corresponde
+        leadgen.errors.first=false; leadgen.errors.last=false; leadgen.errors.email=false;
         if (window.CFG && CFG.LEADGEN && CFG.LEADGEN.saveToLocalStorage && window.localStorage){
-          localStorage.setItem('leadgen_first', leadgen.data.first);
-          localStorage.setItem('leadgen_last',  leadgen.data.last);
-          localStorage.setItem('leadgen_email', leadgen.data.email);
+          localStorage.setItem('leadgen_first', d.first);
+          localStorage.setItem('leadgen_last',  d.last);
+          localStorage.setItem('leadgen_email', d.email);
         }
-        hideModal();
-        // Simula tu flujo de submit original
-        if (typeof window.leadgenSubmit === 'function'){ try { window.leadgenSubmit(); } catch(e){} }
-        else {
-          // fallback si no hay leadgenSubmit: cerrar leadgen y arrancar juego
+        hide();
+        if (typeof window.leadgenSubmit === 'function'){
+          try { window.leadgenSubmit(); } catch(e){}
+        } else {
           if (window.GAME){ window.gameState = window.GAME.GAMEPLAY; }
         }
-      } catch(e){ hideModal(); }
+      } catch(e){ hide(); }
     });
-
-    return modal;
   }
 
-  function showModalFromState(){
-    const m = ensureModal();
-    // Pre-cargar valores desde tu estado si existen
+  function show(){
+    ensureCanvasRef();
+    ensureUI();
     try{
       if (window.leadgen && leadgen.data){
         firstI.value = leadgen.data.first || '';
@@ -1971,29 +1984,28 @@ function _blurLeadgen(){
         emailI.value = leadgen.data.email || '';
       }
     }catch(e){}
-    m.style.display = 'flex';
-    setTimeout(()=> firstI.focus(), 0); // abre teclado
-    // desactivar guards si hay
-    if (window._setGuardsEnabled) _setGuardsEnabled(false);
+    // Ocultar canvas para que NADA intercepte gestos en móvil
+    if (canvasEl && canvasEl.style.display !== 'none'){ canvasEl.style.display = 'none'; wasHidden = true; }
+    root.style.display = 'block';
+    setTimeout(()=> firstI.focus(), 0);
   }
 
-  function hideModal(){
-    if (!modal) return;
-    modal.style.display = 'none';
-    if (window._setGuardsEnabled) _setGuardsEnabled(true);
+  function hide(){
+    if (!root) return;
+    root.style.display = 'none';
+    if (wasHidden && canvasEl){
+      canvasEl.style.display = '';
+      wasHidden = false;
+    }
   }
 
-  // Hook por frame: si estás en LEADGEN, mostramos el modal y dejamos de depender del canvas
-  let wasLeadgen = false;
+  let wasLead = false;
   function tick(){
     try{
-      const onLeadgen = !!(window.GAME && window.gameState === window.GAME.LEADGEN);
-      if (onLeadgen && !wasLeadgen){
-        showModalFromState();
-      } else if (!onLeadgen && wasLeadgen){
-        hideModal();
-      }
-      wasLeadgen = onLeadgen;
+      const onLead = !!(window.GAME && window.gameState === window.GAME.LEADGEN);
+      if (onLead && !wasLead){ show(); }
+      else if (!onLead && wasLead){ hide(); }
+      wasLead = onLead;
     }catch(e){}
     requestAnimationFrame(tick);
   }
