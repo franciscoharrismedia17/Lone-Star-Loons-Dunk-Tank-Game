@@ -521,27 +521,29 @@ async function _mobileRequestFullscreenAndLock() {
 }
 
 // Previene scroll/zoom y gestos por defecto cuando estamos en el lienzo
-function _mobileInstallScrollGuards() {
-  if (!MOBILE_CFG.preventScrollAndZoom) return;
-
-  // Evitar que la página se mueva mientras arrastras para tirar la bola
-  const stop = (ev) => { ev.preventDefault(); };
+function _mobileInstallScrollGuards(){
+  const stop = (ev) => {
+    // Si los guards están deshabilitados, no bloquear
+    if (!window.__guards_enabled) return;
+    // Si estamos escribiendo en el formulario, no bloquear
+    if (gameState === GAME.LEADGEN) return;
+    const t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.isContentEditable)) return;
+    ev.preventDefault();
+  };
   const opts = { passive: false };
 
-  // En todo el documento (simple y efectivo)
   document.addEventListener('touchmove', stop, opts);
-  document.addEventListener('gesturestart', stop, opts); // iOS pinch
+  document.addEventListener('gesturestart', stop, opts);
   document.addEventListener('dblclick', stop, opts);
 
-  // Deshabilitar “pull to refresh” en algunos navegadores
-  document.addEventListener('touchstart', (e) => {
-    if (e.touches && e.touches.length > 1) e.preventDefault(); // bloquea pinch
-  }, opts);
-
-  // Evita menú contextual / selección
-  document.addEventListener('contextmenu', stop);
-  document.body.style.touchAction = 'none';     // CSS equivalente
-  document.body.style.overscrollBehavior = 'none';
+  // Este flag lo usaremos al enfocar/blur del ghost input
+  window.__guards_enabled = true;
+  window._setGuardsEnabled = function(on){
+    window.__guards_enabled = on;
+    document.body.style.touchAction = on ? 'none' : 'auto';
+    document.body.style.overscrollBehavior = on ? 'none' : 'auto';
+  }
 }
 
 // Hook en el primer gesto del usuario (tap/tecla/clic)
@@ -644,6 +646,91 @@ function render(){
     text('Rotate to landscape', width/2, height/2);
     return;
   }
+  let _ghostInput = null;
+let _ghostFieldKey = null;
+
+function _ensureGhostInput() {
+  if (_ghostInput) return _ghostInput;
+  _ghostInput = document.createElement('input');
+  _ghostInput.id = 'ghostInput';
+  _ghostInput.autocomplete = 'name';
+  _ghostInput.spellcheck = false;
+  _ghostInput.style.position = 'fixed';
+  _ghostInput.style.left = '-9999px'; // oculto fuera de pantalla
+  _ghostInput.style.top = '0';
+  _ghostInput.style.opacity = '0.01';
+  _ghostInput.style.zIndex = '9999';
+  _ghostInput.style.fontSize = '16px'; // evita zoom en iOS
+  _ghostInput.style.touchAction = 'auto';
+  // no bloquees nada cuando se toca el input:
+  _ghostInput.addEventListener('touchstart', (e)=>{ /* allow */ }, {passive:true});
+  document.body.appendChild(_ghostInput);
+
+  // Sync hacia leadgen.data
+  _ghostInput.addEventListener('input', ()=>{
+    if (!_ghostFieldKey) return;
+    leadgen.data[_ghostFieldKey] = _ghostInput.value;
+    leadgen.errors[_ghostFieldKey] = false;
+    leadgen.message = '';
+  });
+
+  // Enter = submit
+  _ghostInput.addEventListener('keydown', (ev)=>{
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      leadgenSubmit();
+      _ghostInput.blur();
+    }
+  });
+
+  return _ghostInput;
+}
+
+function _focusLeadgenFieldByIndex(i){
+  const F = CFG.LEADGEN.fields;
+  if (!F || i<0 || i>=F.length) return;
+  leadgen.idx = i;
+  const key = F[i].key;
+  _ghostFieldKey = key;
+
+  const inp = _ensureGhostInput();
+
+  // Configuración por tipo de campo
+  if (key === 'email') {
+    inp.type = 'email';
+    inp.inputMode = 'email';
+    inp.autocomplete = 'email';
+  } else {
+    inp.type = 'text';
+    inp.inputMode = 'text';
+    inp.autocomplete = (key === 'first' || key === 'last') ? 'name' : 'on';
+  }
+
+  inp.value = leadgen.data[key] || '';
+
+  // Moverlo cerca del campo para que iOS no se “pierda” (pero sigue invisible)
+  // Convertimos centro del rect de input a coords de pantalla:
+  if (leadgen._inputRects){
+    const r = leadgen._inputRects[i];
+    // r está en "world" 1920x1080 → a pantalla:
+    const v = getViewport();
+    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
+    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
+    inp.style.left = Math.round(Math.max(0, cx - 40)) + 'px';
+    inp.style.top  = Math.round(Math.max(0, cy - 20)) + 'px';
+  }
+
+  // Habilitar gestos normales mientras el input tiene foco
+  _setGuardsEnabled(false);
+  // Focus (abre teclado)
+  setTimeout(()=> inp.focus(), 0);
+}
+
+function _blurLeadgen(){
+  if (_ghostInput) _ghostInput.blur();
+  _ghostFieldKey = null;
+  _setGuardsEnabled(true);
+}
 
   // ... (resto de tu render) ...
 }
@@ -1306,8 +1393,9 @@ function handleLeadgenMouse(){
         leadgen.idx = i;
         leadgen.message = '';
         _uiClickSound(); // AUDIO: Button al enfocar input
-        return;
-      }
+         _focusLeadgenFieldByIndex(i);
+  return;
+}
     }
   }
   // Submit
@@ -1399,9 +1487,10 @@ function leadgenSubmit(){
   }
 
   // Cerrar leadgen y arrancar nivel 1
-  leadgen.active = false;
-  currentLevelIndex = 0;
-  startLevel();
+_blurLeadgen();
+leadgen.active = false;
+currentLevelIndex = 0;
+startLevel();
 }
 
 // ---------- Viento visual (overlay) ----------
