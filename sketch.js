@@ -1970,3 +1970,22 @@ function cropTransparent(src, alphaThreshold=1){
 
   requestAnimationFrame(tick);
 })();
+
+
+// ======== MOBILE RUNTIME GATE (Leadgen OFF on phones) ========
+(function(){
+  try {
+    const ua = navigator.userAgent || "";
+    const touch = (navigator.maxTouchPoints || 0) > 1;
+    const isIPhone = /iPhone|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+    const isIPad = /iPad/i.test(ua) || (touch && /Macintosh/.test(ua)); // iPadOS reports Mac
+    const IS_MOBILE_DEVICE = isIPhone || isAndroid || isIPad;
+
+    if (IS_MOBILE_DEVICE && CFG && CFG.LEADGEN) {
+      CFG.LEADGEN.enabled = false;
+      CFG.LEADGEN.showOnStart = false;
+    }
+  } catch (e) { /* noop */ }
+})();
+// ======== END MOBILE RUNTIME GATE ========
