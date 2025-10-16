@@ -1743,6 +1743,9 @@ function _ensureGhostInput() {
   // no bloquees nada cuando se toca el input:
   _ghostInput.addEventListener('touchstart', (e)=>{ /* allow */ }, {passive:true});
   document.body.appendChild(_ghostInput);
+  // iOS quirk: marcar como editable y asegurar z-index
+_ghostInput.setAttribute('aria-hidden', 'false');
+_ghostInput.style.pointerEvents = 'auto';
 
   // Sync hacia leadgen.data
   _ghostInput.addEventListener('input', ()=>{
@@ -1773,7 +1776,7 @@ function _focusLeadgenFieldByIndex(i){
 
   const inp = _ensureGhostInput();
 
-  // Configuración por tipo de campo
+  // Tipo de teclado / autocompletado
   if (key === 'email') {
     inp.type = 'email';
     inp.inputMode = 'email';
@@ -1783,6 +1786,35 @@ function _focusLeadgenFieldByIndex(i){
     inp.inputMode = 'text';
     inp.autocomplete = (key === 'first' || key === 'last') ? 'name' : 'on';
   }
+
+  inp.value = leadgen.data[key] || '';
+
+  // Posicionar el input CERCA del campo (que quede "visible" para iOS)
+  if (leadgen._inputRects){
+    const r = leadgen._inputRects[i];
+    const v = getViewport();
+    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
+    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
+    inp.style.left = Math.round(Math.max(8, cx - 40)) + 'px';
+    inp.style.top  = Math.round(Math.max(8, cy - 20)) + 'px';
+  } else {
+    // fallback: esquina superior
+    inp.style.left = '12px';
+    inp.style.top  = '12px';
+  }
+
+  // MUY IMPORTANTE: desactivar guards ANTES de focusear
+  _setGuardsEnabled(false);
+
+  // Foco sin setTimeout (dentro del mismo gesto táctil)
+  // y click para forzar teclado en algunos Android/iOS
+  try { inp.focus({ preventScroll: true }); } catch(e) { inp.focus(); }
+  try { inp.click(); } catch(e) {}
+
+  // Seleccionar al final (no rompe el foco)
+  const L = inp.value.length;
+  try { inp.setSelectionRange(L, L); } catch(e) {}
+}
 
   inp.value = leadgen.data[key] || '';
 
