@@ -545,6 +545,11 @@ function _mobileInstallScrollGuards(){
     document.body.style.overscrollBehavior = on ? 'none' : 'auto';
   }
 }
+// Alias simple para usar _setGuardsEnabled() en el resto del código
+function _setGuardsEnabled(on) {
+  window._setGuardsEnabled && window._setGuardsEnabled(on);
+}
+
 
 // Hook en el primer gesto del usuario (tap/tecla/clic)
 async function _mobileOnFirstUserGesture() {
@@ -646,91 +651,7 @@ function render(){
     text('Rotate to landscape', width/2, height/2);
     return;
   }
-  let _ghostInput = null;
-let _ghostFieldKey = null;
 
-function _ensureGhostInput() {
-  if (_ghostInput) return _ghostInput;
-  _ghostInput = document.createElement('input');
-  _ghostInput.id = 'ghostInput';
-  _ghostInput.autocomplete = 'name';
-  _ghostInput.spellcheck = false;
-  _ghostInput.style.position = 'fixed';
-  _ghostInput.style.left = '-9999px'; // oculto fuera de pantalla
-  _ghostInput.style.top = '0';
-  _ghostInput.style.opacity = '0.01';
-  _ghostInput.style.zIndex = '9999';
-  _ghostInput.style.fontSize = '16px'; // evita zoom en iOS
-  _ghostInput.style.touchAction = 'auto';
-  // no bloquees nada cuando se toca el input:
-  _ghostInput.addEventListener('touchstart', (e)=>{ /* allow */ }, {passive:true});
-  document.body.appendChild(_ghostInput);
-
-  // Sync hacia leadgen.data
-  _ghostInput.addEventListener('input', ()=>{
-    if (!_ghostFieldKey) return;
-    leadgen.data[_ghostFieldKey] = _ghostInput.value;
-    leadgen.errors[_ghostFieldKey] = false;
-    leadgen.message = '';
-  });
-
-  // Enter = submit
-  _ghostInput.addEventListener('keydown', (ev)=>{
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      leadgenSubmit();
-      _ghostInput.blur();
-    }
-  });
-
-  return _ghostInput;
-}
-
-function _focusLeadgenFieldByIndex(i){
-  const F = CFG.LEADGEN.fields;
-  if (!F || i<0 || i>=F.length) return;
-  leadgen.idx = i;
-  const key = F[i].key;
-  _ghostFieldKey = key;
-
-  const inp = _ensureGhostInput();
-
-  // Configuración por tipo de campo
-  if (key === 'email') {
-    inp.type = 'email';
-    inp.inputMode = 'email';
-    inp.autocomplete = 'email';
-  } else {
-    inp.type = 'text';
-    inp.inputMode = 'text';
-    inp.autocomplete = (key === 'first' || key === 'last') ? 'name' : 'on';
-  }
-
-  inp.value = leadgen.data[key] || '';
-
-  // Moverlo cerca del campo para que iOS no se “pierda” (pero sigue invisible)
-  // Convertimos centro del rect de input a coords de pantalla:
-  if (leadgen._inputRects){
-    const r = leadgen._inputRects[i];
-    // r está en "world" 1920x1080 → a pantalla:
-    const v = getViewport();
-    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
-    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
-    inp.style.left = Math.round(Math.max(0, cx - 40)) + 'px';
-    inp.style.top  = Math.round(Math.max(0, cy - 20)) + 'px';
-  }
-
-  // Habilitar gestos normales mientras el input tiene foco
-  _setGuardsEnabled(false);
-  // Focus (abre teclado)
-  setTimeout(()=> inp.focus(), 0);
-}
-
-function _blurLeadgen(){
-  if (_ghostInput) _ghostInput.blur();
-  _ghostFieldKey = null;
-  _setGuardsEnabled(true);
-}
 
   // ... (resto de tu render) ...
 }
@@ -1802,4 +1723,89 @@ function cropTransparent(src, alphaThreshold=1){
   if (maxX<minX || maxY<minY) return {img:src, ox:0, oy:0};
   const cw=maxX-minX+1, ch=maxY-minY+1;
   return { img:src.get(minX, minY, cw, ch), ox:minX, oy:minY };
+}
+    let _ghostInput = null;
+let _ghostFieldKey = null;
+
+function _ensureGhostInput() {
+  if (_ghostInput) return _ghostInput;
+  _ghostInput = document.createElement('input');
+  _ghostInput.id = 'ghostInput';
+  _ghostInput.autocomplete = 'name';
+  _ghostInput.spellcheck = false;
+  _ghostInput.style.position = 'fixed';
+  _ghostInput.style.left = '-9999px'; // oculto fuera de pantalla
+  _ghostInput.style.top = '0';
+  _ghostInput.style.opacity = '0.01';
+  _ghostInput.style.zIndex = '9999';
+  _ghostInput.style.fontSize = '16px'; // evita zoom en iOS
+  _ghostInput.style.touchAction = 'auto';
+  // no bloquees nada cuando se toca el input:
+  _ghostInput.addEventListener('touchstart', (e)=>{ /* allow */ }, {passive:true});
+  document.body.appendChild(_ghostInput);
+
+  // Sync hacia leadgen.data
+  _ghostInput.addEventListener('input', ()=>{
+    if (!_ghostFieldKey) return;
+    leadgen.data[_ghostFieldKey] = _ghostInput.value;
+    leadgen.errors[_ghostFieldKey] = false;
+    leadgen.message = '';
+  });
+
+  // Enter = submit
+  _ghostInput.addEventListener('keydown', (ev)=>{
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      leadgenSubmit();
+      _ghostInput.blur();
+    }
+  });
+
+  return _ghostInput;
+}
+
+function _focusLeadgenFieldByIndex(i){
+  const F = CFG.LEADGEN.fields;
+  if (!F || i<0 || i>=F.length) return;
+  leadgen.idx = i;
+  const key = F[i].key;
+  _ghostFieldKey = key;
+
+  const inp = _ensureGhostInput();
+
+  // Configuración por tipo de campo
+  if (key === 'email') {
+    inp.type = 'email';
+    inp.inputMode = 'email';
+    inp.autocomplete = 'email';
+  } else {
+    inp.type = 'text';
+    inp.inputMode = 'text';
+    inp.autocomplete = (key === 'first' || key === 'last') ? 'name' : 'on';
+  }
+
+  inp.value = leadgen.data[key] || '';
+
+  // Moverlo cerca del campo para que iOS no se “pierda” (pero sigue invisible)
+  // Convertimos centro del rect de input a coords de pantalla:
+  if (leadgen._inputRects){
+    const r = leadgen._inputRects[i];
+    // r está en "world" 1920x1080 → a pantalla:
+    const v = getViewport();
+    const cx = v.x + r.x * v.s + r.w * v.s * 0.5;
+    const cy = v.y + r.y * v.s + r.h * v.s * 0.5;
+    inp.style.left = Math.round(Math.max(0, cx - 40)) + 'px';
+    inp.style.top  = Math.round(Math.max(0, cy - 20)) + 'px';
+  }
+
+  // Habilitar gestos normales mientras el input tiene foco
+  _setGuardsEnabled(false);
+  // Focus (abre teclado)
+  setTimeout(()=> inp.focus(), 0);
+}
+
+function _blurLeadgen(){
+  if (_ghostInput) _ghostInput.blur();
+  _ghostFieldKey = null;
+  _setGuardsEnabled(true);
 }
