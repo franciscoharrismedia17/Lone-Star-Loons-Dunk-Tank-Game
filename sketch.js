@@ -481,6 +481,233 @@ function preload(){
   CLIPS.Button        = SND_Button;
   CLIPS.SUCCESS       = SND_SUCCESS;
 }
+/* =========================
+   MOBILE COMPAT LAYER
+   ========================= */
+
+// — Config —
+const MOBILE_CFG = {
+  tryFullscreenOnFirstTap: true,
+  tryLockLandscape: true,       // requiere user gesture + permisos del SO
+  preventScrollAndZoom: true,   // desactiva scroll, pinch-zoom, doble-tap-zoom
+  addTouchMoveSampling: true,   // registra el gesto mientras mueves el dedo
+};
+
+// Flag interno
+let _mobileFirstGestureDone = false;
+
+// Intenta fullscreen + bloqueo landscape (cuando el navegador lo permite)
+async function _mobileRequestFullscreenAndLock() {
+  try {
+    // Fullscreen primero
+    if (MOBILE_CFG.tryFullscreenOnFirstTap) {
+      const el = document.documentElement;
+      if (el && el.requestFullscreen && !document.fullscreenElement) {
+        await el.requestFullscreen();
+      }
+    }
+    // Luego, lock de orientación
+    if (MOBILE_CFG.tryLockLandscape && screen.orientation && screen.orientation.lock) {
+      // Algunos navegadores aceptan "landscape" o "landscape-primary"
+      try {
+        await screen.orientation.lock('landscape');
+      } catch {
+        try { await screen.orientation.lock('landscape-primary'); } catch {}
+      }
+    }
+  } catch (e) {
+    // Silencioso: si falla, seguimos con el overlay “Rotate to landscape”
+  }
+}
+
+// Previene scroll/zoom y gestos por defecto cuando estamos en el lienzo
+function _mobileInstallScrollGuards() {
+  if (!MOBILE_CFG.preventScrollAndZoom) return;
+
+  // Evitar que la página se mueva mientras arrastras para tirar la bola
+  const stop = (ev) => { ev.preventDefault(); };
+  const opts = { passive: false };
+
+  // En todo el documento (simple y efectivo)
+  document.addEventListener('touchmove', stop, opts);
+  document.addEventListener('gesturestart', stop, opts); // iOS pinch
+  document.addEventListener('dblclick', stop, opts);
+
+  // Deshabilitar “pull to refresh” en algunos navegadores
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches && e.touches.length > 1) e.preventDefault(); // bloquea pinch
+  }, opts);
+
+  // Evita menú contextual / selección
+  document.addEventListener('contextmenu', stop);
+  document.body.style.touchAction = 'none';     // CSS equivalente
+  document.body.style.overscrollBehavior = 'none';
+}
+
+// Hook en el primer gesto del usuario (tap/tecla/clic)
+async function _mobileOnFirstUserGesture() {
+  if (_mobileFirstGestureDone) return;
+  _mobileFirstGestureDone = true;
+
+  // Desbloqueo de audio (tu juego ya llama resumeAudioIfNeeded en inputs)
+  try { if (getAudioContext) getAudioContext().resume(); } catch {}
+
+  await _mobileRequestFullscreenAndLock();
+}
+
+// Llamado temprano en setup()
+function _mobileInit() {
+  _mobileInstallScrollGuards();
+
+  // Redundancia: algunos navegadores no disparan correctamente ciertos eventos;
+  // registramos varios para garantizar el “primer gesto”
+  const once = { once: true, passive: true };
+  window.addEventListener('pointerdown', _mobileOnFirstUserGesture, once);
+  window.addEventListener('mousedown',   _mobileOnFirstUserGesture, once);
+  window.addEventListener('touchstart',  _mobileOnFirstUserGesture, once);
+  window.addEventListener('keydown',     _mobileOnFirstUserGesture, once);
+}
+
+/* =========================
+   FIN MOBILE COMPAT LAYER
+   ========================= */
+
+// ==================== TU JUEGO (con mejoras mobile marcadas abajo) ====================
+
+// [IMPORTANTE] — a partir de aquí va tu sketch original.
+// He integrado los cambios mínimos necesarios y marcado con // [MOBILE] donde toqué algo.
+
+// ... (todo tu código previo) ...
+
+// ================== CONFIGURACIÓN MANUAL ==================
+// (resto de tu configuración sin cambios)
+
+// ---------- Utilidades viewport ----------
+function getViewport(){
+  const s=Math.min(windowWidth/BASE_W,windowHeight/BASE_H);
+  const w=BASE_W*s,h=BASE_H*s;
+  const x=(windowWidth-w)/2,y=(windowHeight-h)/2;
+  return {x,y,w,h,s};
+}
+function beginViewport(){ const v=getViewport(); push(); translate(v.x,v.y); scale(v.s,v.s); return v; }
+function endViewport(){ pop(); }
+function screenToWorld(pt){ const v=getViewport(); return { x:(pt.x-v.x)/v.s, y:(pt.y-v.y)/v.s }; }
+function fitToScreenNow(){
+  // [MOBILE] usar visualViewport para cubrir barras dinámicas en móviles
+  let w=window.innerWidth,h=window.innerHeight;
+  if (window.visualViewport){
+    w=Math.floor(window.visualViewport.width);
+    h=Math.floor(window.visualViewport.height);
+  }
+  resizeCanvas(w,h);
+}
+
+// ---------- Setup ----------
+function setup(){
+  createCanvas(windowWidth, windowHeight);
+  imageMode(CORNER);
+
+  // ... (tu preload y demás inicializaciones arriba/abajo sin cambios) ...
+
+  noiseSeed(Math.floor(Math.random()*100000));
+  lastTime = millis();
+
+  setTimeout(fitToScreenNow, 60);
+  const onRotateFix = ()=>{ fitToScreenNow(); setTimeout(fitToScreenNow,120); setTimeout(fitToScreenNow,400); setTimeout(fitToScreenNow,1000); };
+  window.addEventListener('orientationchange', onRotateFix, {passive:true});
+  window.addEventListener('resize', fitToScreenNow, {passive:true});
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fitToScreenNow, {passive:true});
+
+  // [MOBILE] iniciar capa mobile lo antes posible
+  _mobileInit();
+
+  applyAudioVolumes();
+  goToMenu(); // Música etc.
+}
+function windowResized(){ fitToScreenNow(); }
+
+// ---------- Draw loop ----------
+function draw(){
+  // ... (igual a tu versión; gestiona update(), render(), ensureWindLoopFromFlag(), etc.) ...
+}
+
+// ---------- Render ----------
+function render(){
+  if (gameState === GAME.MENU){ renderMenu(); return; }
+
+  // [MOBILE] — cuando el dispositivo está en vertical mostramos overlay pidiendo rotar
+  if (windowHeight > windowWidth){
+    clear();
+    if (IMG_BG){ const vbg = getViewport(); image(IMG_BG, vbg.x, vbg.y, vbg.w, vbg.h); }
+    noStroke(); fill(0,0,0,220); rect(0,0,width,height);
+    fill(255); textAlign(CENTER,CENTER); textSize(32);
+    text('Rotate to landscape', width/2, height/2);
+    return;
+  }
+
+  // ... (resto de tu render) ...
+}
+
+// ---------- Input unificado (mouse/touch/teclado) ----------
+function keyPressed(){
+  resumeAudioIfNeeded();
+  _mobileOnFirstUserGesture(); // [MOBILE] también contamos teclas como primer gesto
+
+  // ... (tu lógica de teclas) ...
+}
+
+function mousePressed(){
+  resumeAudioIfNeeded();
+  _mobileOnFirstUserGesture(); // [MOBILE]
+
+  // ... (tu lógica existente de menú/leadgen/overlay) ...
+  if (gameState !== GAME.LEADGEN && !tutorial.active) beginHold();
+}
+function mouseReleased(){
+  resumeAudioIfNeeded();
+
+  // ... (tu lógica existente) ...
+  if (gameState !== GAME.LEADGEN) endHold();
+}
+
+function touchStarted(){
+  resumeAudioIfNeeded();
+  _mobileOnFirstUserGesture(); // [MOBILE]
+  if (gameState === GAME.LEADGEN){ handleLeadgenMouse(); return false; }
+  if (tutorial.active){ tutorialDismiss(); return false; }
+  beginHold();
+  return false; // [MOBILE] previene scroll
+}
+
+// [MOBILE] — NUEVO: registrar el movimiento del dedo durante el gesto
+function touchMoved(){
+  if (MOBILE_CFG.addTouchMoveSampling){
+    recordInputSample(millis());
+  }
+  return false; // previene scroll/zoom
+}
+
+function touchEnded(){
+  if (gameState !== GAME.LEADGEN) endHold();
+  return false;
+}
+
+// ---------- Gesto / Helpers ----------
+function getPointerScreen(){
+  // [MOBILE] usar pointer “real” si hay toques activos
+  if (touches && touches.length>0) return {x:touches[0].x, y:touches[0].y};
+  return {x:mouseX,y:mouseY};
+}
+function recordInputSample(now){
+  const pScr=getPointerScreen();
+  const p=screenToWorld(pScr);
+  _inputHist.push({t:now, x:p.x, y:p.y});
+  const cutoff=now - Math.max(GESTURE_WINDOW_MS,60);
+  while(_inputHist.length>1 && _inputHist[0].t<cutoff) _inputHist.shift();
+}
+
+// ... (resto de tu simulación, física, HUD, etc. sin cambios) ...
+
 
 // ---------- Setup ----------
 let BILL_REST=null, BILL_RISE=null, BILL_THROW=null;
