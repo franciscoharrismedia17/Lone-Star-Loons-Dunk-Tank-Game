@@ -1972,33 +1972,32 @@ function cropTransparent(src, alphaThreshold=1){
 })();
 
 
-// ======== MOBILE RUNTIME GATE (Leadgen OFF on phones) ========
-(function(){
-  try {
-    const ua = navigator.userAgent || "";
-    const touch = (navigator.maxTouchPoints || 0) > 1;
-    const isIPhone = /iPhone|iPod/i.test(ua);
-    const isAndroid = /Android/i.test(ua);
-    const isIPad = /iPad/i.test(ua) || (touch && /Macintosh/.test(ua)); // iPadOS reports Mac
-    const IS_MOBILE_DEVICE = isIPhone || isAndroid || isIPad;
-
-    if (IS_MOBILE_DEVICE && CFG && CFG.LEADGEN) {
-      CFG.LEADGEN.enabled = false;
-      CFG.LEADGEN.showOnStart = false;
-    }
-  } catch (e) { /* noop */ }
-})();
-// ======== END MOBILE RUNTIME GATE ========
-
-
-/* === MOBILE START OVERLAY — FIXED (HTML, standalone) === */
+/* === MOBILE FORM REDIRECT GATE (append-only; non-destructive) === */
 (function(){
   const UA = navigator.userAgent||"";
-  const touchPts = (navigator.maxTouchPoints||0);
+  const touch = (navigator.maxTouchPoints||0) > 0;
   const isIPhone = /iPhone|iPod/i.test(UA);
   const isAndroid = /Android/i.test(UA);
-  const isIPad = /iPad/i.test(UA) || (touchPts>0 && /Macintosh/.test(UA));
+  const isIPad = /iPad/i.test(UA) || (touch && /Macintosh/.test(UA));
   const IS_MOBILE = isIPhone || isAndroid || isIPad;
+
+  // Path to external form (same folder as index.html)
+  const FORM_PATH = "form.html";
+
+  const RETURN_FLAG = "leadgenReturn";
+  const STORAGE_KEY_NEW = "leadgenData";
+  const K1="leadgen_first", K2="leadgen_last", K3="leadgen_email";
+
+  function hasData(){
+    try{
+      // Accept either the new consolidated object or the legacy separate keys
+      const obj = JSON.parse(localStorage.getItem(STORAGE_KEY_NEW)||"{}");
+      if (obj && obj.first && obj.last && obj.email) return true;
+      const a = localStorage.getItem(K1)||"", b=localStorage.getItem(K2)||"", c=localStorage.getItem(K3)||"";
+      if (a && b && c) return true;
+    }catch(e){}
+    return false;
+  }
 
   function disableOldLeadgen(){
     try{
@@ -2009,146 +2008,58 @@ function cropTransparent(src, alphaThreshold=1){
     }catch(e){}
   }
 
-  const STORAGE_KEY = "startOverlayData";
-  let overlay, panel, fFirst, fLast, fEmail, bSubmit, bCancel;
-  let armed=false, done=false;
-
-  const style = document.createElement("style");
-  style.textContent = `
-  .mlovl{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;z-index:2147483646;
-         align-items:center;justify-content:center;-webkit-backdrop-filter:saturate(120%) blur(2px);backdrop-filter:saturate(120%) blur(2px);
-         pointer-events:auto;}
-  .mlpan{width:min(520px,92vw);background:#1e1e1e;color:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.4);
-         padding:18px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
-  .mlttl{margin:4px 0 12px;font-size:18px;text-align:center;font-weight:700}
-  .row{margin:12px 0}.lbl{display:block;font-size:12px;color:#bdbdbd;margin:0 2px 6px}
-  .inp{width:100%;box-sizing:border-box;font-size:16px;padding:12px 14px;border-radius:10px;border:2px solid #4a4a4a;background:#171717;color:#fff}
-  .inp:focus{outline:none;border-color:#7ec0ff;background:#121212}
-  .acts{display:flex;gap:12px;justify-content:flex-end;align-items:center;margin-top:14px}
-  .btn{appearance:none;border:0;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:600}
-  .ok{background:#2e8b57;color:#fff;opacity:.6}.ok.enabled{opacity:1}
-  .cx{background:#3a3a3a;color:#fff}
-  .hint{font-size:12px;color:#bdbdbd;margin-top:8px;text-align:left}
-  @media (pointer:coarse){.inp{font-size:17px}}`;
-
-  function emailOK(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v||""); }
-  function valid(){ return fFirst.value.trim() && fLast.value.trim() && emailOK(fEmail.value.trim()); }
-  function updateBtn(){ if(valid()) bSubmit.classList.add("enabled"); else bSubmit.classList.remove("enabled"); }
-
-  function build(){
-    if(overlay) return;
-    document.head.appendChild(style);
-    overlay = document.createElement("div"); overlay.className="mlovl"; overlay.setAttribute("role","dialog"); overlay.setAttribute("aria-modal","true");
-    panel = document.createElement("div"); panel.className="mlpan";
-    const ttl = document.createElement("div"); ttl.className="mlttl"; ttl.textContent="Fill out form to begin";
-
-    const r1=document.createElement("div"); r1.className="row";
-    const l1=document.createElement("label"); l1.className="lbl"; l1.textContent="First Name";
-    fFirst=document.createElement("input"); fFirst.className="inp"; fFirst.placeholder="First Name"; fFirst.autocapitalize="words"; fFirst.inputMode="text"; fFirst.tabIndex=1;
-
-    const r2=document.createElement("div"); r2.className="row";
-    const l2=document.createElement("label"); l2.className="lbl"; l2.textContent="Last Name";
-    fLast=document.createElement("input"); fLast.className="inp"; fLast.placeholder="Last Name"; fLast.autocapitalize="words"; fLast.inputMode="text"; fLast.tabIndex=2;
-
-    const r3=document.createElement("div"); r3.className="row";
-    const l3=document.createElement("label"); l3.className="lbl"; l3.textContent="Email";
-    fEmail=document.createElement("input"); fEmail.className="inp"; fEmail.placeholder="Email"; fEmail.type="email"; fEmail.inputMode="email"; fEmail.tabIndex=3;
-
-    [fFirst,fLast,fEmail].forEach(el=> el.addEventListener("input", updateBtn));
-
-    const acts=document.createElement("div"); acts.className="acts";
-    const hint=document.createElement("div"); hint.className="hint"; hint.textContent="Complete all fields with a valid email";
-    bCancel=document.createElement("button"); bCancel.className="btn cx"; bCancel.type="button"; bCancel.textContent="Cancel"; bCancel.tabIndex=5;
-    bSubmit=document.createElement("button"); bSubmit.className="btn ok"; bSubmit.type="button"; bSubmit.textContent="Submit"; bSubmit.tabIndex=4;
-
-    r1.appendChild(l1); r1.appendChild(fFirst);
-    r2.appendChild(l2); r2.appendChild(fLast);
-    r3.appendChild(l3); r3.appendChild(fEmail);
-    acts.appendChild(hint); acts.appendChild(bCancel); acts.appendChild(bSubmit);
-    panel.appendChild(ttl); panel.appendChild(r1); panel.appendChild(r2); panel.appendChild(r3); panel.appendChild(acts);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-
-    // Prefill
-    try{ const o = JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");
-      if(o.first) fFirst.value=o.first; if(o.last) fLast.value=o.last; if(o.email) fEmail.value=o.email;
-    }catch(e){}
-    updateBtn();
-
-    function tryFocus(el, attempts=5){
-      let tries=0;
-      const kick = ()=>{
-        if(document.activeElement!==el){ el.focus(); }
-        if(++tries<attempts) setTimeout(kick, 60);
-      };
-      if(document.activeElement!==el){ try{ el.focus(); }catch(e){} }
-      setTimeout(kick, 0);
-    }
-
-    function show(){
-      overlay.style.display="flex";
-      document.documentElement.style.overflow="hidden"; document.body.style.overflow="hidden";
-      tryFocus(fFirst);
-    }
-    function hide(){
-      overlay.style.display="none";
-      document.documentElement.style.overflow=""; document.body.style.overflow="";
-    }
-
-    overlay.addEventListener("touchend", (ev)=>{
-      const t = ev.target;
-      if(t.classList && t.classList.contains("inp") && document.activeElement!==t){ t.focus(); }
-    }, {passive:true});
-
-    bCancel.addEventListener("click", hide);
-    bSubmit.addEventListener("click", ()=>{
-      if(!valid()) return;
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        first:fFirst.value.trim(), last:fLast.value.trim(), email:fEmail.value.trim(), ts:Date.now()
-      })); }catch(e){}
-      done = true; hide();
-      if(typeof window.__mlfix_continue === "function"){ window.__mlfix_continue(); }
-    });
-
-    window.__mlfix_show = show;
-    window.__mlfix_hide = hide;
+  function goForm(){
+    const here = location.href;
+    try { sessionStorage.setItem("postReturnTarget", here); } catch(e){}
+    location.href = FORM_PATH + "?return=" + encodeURIComponent(here);
   }
 
-  function gateStarter(name){
-    if(typeof window[name] !== "function" || window[name].__mlfixWrapped) return false;
+  function onReturnResumeIfAny(){
+    try{
+      if (sessionStorage.getItem(RETURN_FLAG) === "1"){
+        sessionStorage.removeItem(RETURN_FLAG);
+        // no-op: your normal start flow continues from menu
+      }
+    }catch(e){}
+  }
+
+  function wrapStarter(name){
+    if (typeof window[name] !== "function" || window[name].__mobGateWrapped) return false;
     const orig = window[name];
     const wrapped = function(){
-      if(IS_MOBILE && !done){
-        build(); disableOldLeadgen();
-        window.__mlfix_continue = ()=> { try{ orig.apply(this, arguments); }catch(e){} };
-        window.__mlfix_show();
+      if (IS_MOBILE && !hasData()){
+        disableOldLeadgen();
+        goForm();
         return;
       }
       return orig.apply(this, arguments);
     };
-    wrapped.__mlfixWrapped = true;
+    wrapped.__mobGateWrapped = true;
     window[name] = wrapped;
     return true;
   }
 
   function arm(){
-    if(armed) return; armed=true;
-    if(!IS_MOBILE) return;
-
-    build(); disableOldLeadgen();
+    if (!IS_MOBILE) return;
+    disableOldLeadgen();
+    onReturnResumeIfAny();
 
     const names = ["startLevel","startGame","beginGame"];
-    names.forEach(gateStarter);
+    names.forEach(wrapStarter);
 
+    // Keep trying a bit in case the starter is defined later
     let tries=0;
-    const timer=setInterval(()=>{
-      let any=false; names.forEach(n=> any = gateStarter(n) || any);
-      if(any || (++tries>200)) clearInterval(timer);
+    const t = setInterval(()=>{
+      let any=false; names.forEach(n=> any = wrapStarter(n) || any);
+      if (any || (++tries>200)) clearInterval(t); // ~10s @50ms
     }, 50);
   }
 
-  if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", arm, {once:true}); }
-  else { arm(); }
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", arm, {once:true});
+  } else {
+    arm();
+  }
 })();
-/* === END MOBILE START OVERLAY — FIXED === */
+/* === END MOBILE FORM REDIRECT GATE === */
 

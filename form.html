@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Form</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101010; --panel:#1e1e1e; --text:#fff; --muted:#bdbdbd;
+    --accent:#2e8b57; --accent-weak:#255c42; --stroke:#4a4a4a; --stroke-focus:#7ec0ff;
+  }
+  html, body { margin:0; padding:0; height:100%; background:var(--bg); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  .wrap { min-height:100%; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .panel { width:min(520px, 92vw); background:var(--panel); color:var(--text); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.4); padding:18px; }
+  .title { text-align:center; font-weight:700; margin:4px 0 12px; font-size:20px; }
+  .row { margin:12px 0; }
+  .lbl { display:block; font-size:12px; color:var(--muted); margin:0 2px 6px; }
+  .inp { width:100%; box-sizing:border-box; font-size:17px; padding:12px 14px; border-radius:10px; border:2px solid var(--stroke); background:#171717; color:var(--text); }
+  .inp:focus { outline:none; border-color: var(--stroke-focus); background:#121212; }
+  .actions { display:flex; gap:12px; justify-content:flex-end; align-items:center; margin-top:14px; }
+  .btn { appearance:none; border:0; border-radius:10px; padding:12px 18px; font-size:16px; font-weight:600; }
+  .submit { background:var(--accent); color:var(--text); opacity:.6; }
+  .submit.enabled { opacity:1; }
+  .cancel { background:#3a3a3a; color:var(--text); }
+  .hint { font-size:12px; color:var(--muted); margin-top:8px; text-align:left; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <form class="panel" id="leadForm">
+      <div class="title">Fill out form to begin</div>
+
+      <div class="row">
+        <label class="lbl" for="first">First Name</label>
+        <input id="first" class="inp" name="first" placeholder="First Name" inputmode="text" autocapitalize="words" autocomplete="given-name" required />
+      </div>
+
+      <div class="row">
+        <label class="lbl" for="last">Last Name</label>
+        <input id="last" class="inp" name="last" placeholder="Last Name" inputmode="text" autocapitalize="words" autocomplete="family-name" required />
+      </div>
+
+      <div class="row">
+        <label class="lbl" for="email">Email</label>
+        <input id="email" class="inp" name="email" placeholder="Email" type="email" inputmode="email" autocomplete="email" required />
+      </div>
+
+      <div class="actions">
+        <div class="hint" id="hint">Complete all fields with a valid email</div>
+        <button type="button" class="btn cancel" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn submit" id="submitBtn">Submit</button>
+      </div>
+    </form>
+  </div>
+
+<script>
+(function(){
+  const q = new URLSearchParams(location.search);
+  const ret = q.get("return") || sessionStorage.getItem("postReturnTarget") || (location.origin + "/");
+  const STORAGE_KEY = "leadgenData";
+  const form = document.getElementById("leadForm");
+  const first = document.getElementById("first");
+  const last  = document.getElementById("last");
+  const email = document.getElementById("email");
+  const submitBtn = document.getElementById("submitBtn");
+  const cancelBtn = document.getElementById("cancelBtn");
+  const hint = document.getElementById("hint");
+
+  // Prefill si existe
+  try {
+    const o = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    if (o.first) first.value = o.first;
+    if (o.last)  last.value  = o.last;
+    if (o.email) email.value = o.email;
+  } catch (e) {}
+
+  function emailOK(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v||""); }
+  function update() {
+    const ok = first.value.trim() && last.value.trim() && emailOK(email.value.trim());
+    submitBtn.classList.toggle("enabled", ok);
+    hint.textContent = ok ? "Ready!" : "Complete all fields with a valid email";
+  }
+  ["input","change"].forEach(ev => [first,last,email].forEach(i => i.addEventListener(ev, update)));
+  update();
+
+  // Focus inmediato al cargar (ayuda iOS)
+  setTimeout(()=> first.focus(), 0);
+
+  form.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    if (!emailOK(email.value.trim())) return update();
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        first: first.value.trim(),
+        last:  last.value.trim(),
+        email: email.value.trim(),
+        ts: Date.now()
+      }));
+    } catch (e) {}
+
+    // Marcar retorno y volver al juego
+    try { sessionStorage.setItem("leadgenReturn", "1"); } catch(e) {}
+    location.replace(ret);
+  });
+
+  cancelBtn.addEventListener("click", ()=>{
+    // Volver sin guardar
+    location.replace(ret);
+  });
+})();
+</script>
+</body>
+</html>
