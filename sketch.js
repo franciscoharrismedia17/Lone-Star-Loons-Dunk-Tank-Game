@@ -1457,41 +1457,79 @@ function handleLeadgenKeyTyped(){
 }
 
 // Enviar formulario (Leadgen)
-function leadgenSubmit(){
+function leadgenSubmit() {
   const d = leadgen.data;
   leadgen.errors = {};
 
-  // Validaciones
+  // Validaciones básicas
   if (!d.first || d.first.trim() === '') leadgen.errors.first = true;
   if (!d.last  || d.last.trim()  === '') leadgen.errors.last  = true;
   if (!d.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) leadgen.errors.email = true;
 
-  if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email){
+  if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email) {
     leadgen.submitted = false;
     leadgen.message = 'Please complete all fields (valid email required).';
-    // foco al primero con error
-    const order = ['first','last','email'];
-    for (let i=0;i<order.length;i++){ if (leadgen.errors[order[i]]){ leadgen.idx = i; break; } }
+    const order = ['first', 'last', 'email'];
+    for (let i = 0; i < order.length; i++) {
+      if (leadgen.errors[order[i]]) {
+        leadgen.idx = i;
+        break;
+      }
+    }
     return;
   }
 
-  // Éxito
+  // Mostrar mensaje de progreso
   leadgen.submitted = true;
   leadgen.message = 'Thanks! Loading…';
 
-  // Persistencia opcional
-  if (CFG.LEADGEN.saveToLocalStorage && window.localStorage){
+  // Guardar datos en localStorage
+  try {
     localStorage.setItem('leadgen_first', d.first);
-    localStorage.setItem('leadgen_last',  d.last);
+    localStorage.setItem('leadgen_last', d.last);
     localStorage.setItem('leadgen_email', d.email);
-  }
+    localStorage.setItem('leadgenData', JSON.stringify({
+      first: d.first, last: d.last, email: d.email, ts: Date.now()
+    }));
+  } catch (e) {}
 
-  // Cerrar leadgen y arrancar nivel 1
-_blurLeadgen();
-leadgen.active = false;
-currentLevelIndex = 0;
-startLevel();
+  // Cerrar overlay visual
+  _blurLeadgen();
+  leadgen.active = false;
+  paused = false;
+  overlay.active = false;
+  overlay.t = 0;
+
+  // Reiniciar parámetros
+  if (typeof hitsThisLevel !== 'undefined') hitsThisLevel = 0;
+  if (typeof currentLevelIndex !== 'undefined') currentLevelIndex = 0;
+
+  // 🔹 Asegurar estado de juego
+  try {
+    if (typeof GAME !== 'undefined') gameState = GAME.PLAY;
+  } catch (e) {}
+
+  // 🔹 Intentar iniciar el nivel; si algo falla, reintentar
+  const safeStart = () => {
+    try {
+      if (typeof startLevel === 'function') {
+        startLevel();
+      } else if (typeof startGame === 'function') {
+        startGame();
+      } else if (typeof beginGame === 'function') {
+        beginGame();
+      } else {
+        console.warn('⚠️ No se encontró función de inicio (startLevel/startGame/beginGame)');
+      }
+    } catch (e) {
+      console.error('LeadgenSubmit → error al iniciar:', e);
+    }
+  };
+
+  // Esperar un poco por si hay crossfade o música cargando
+  setTimeout(safeStart, 500);
 }
+
 
 // ---------- Viento visual (overlay) ----------
 function drawWindOverlay(){
@@ -2105,3 +2143,58 @@ function cropTransparent(src, alphaThreshold=1){
   }
 })();
  /* === END MOBILE PATCH === */
+  /* === DESKTOP FIX: Forzar inicio de juego tras enviar formulario === */
+(function() {
+  // Si ya existe leadgenSubmit, lo reemplazamos por uno que sí arranca el juego
+  if (typeof window.leadgenSubmit === "function" && !window.leadgenSubmit.__patched) {
+    const oldSubmit = window.leadgenSubmit;
+
+    window.leadgenSubmit = function() {
+      try {
+        oldSubmit.apply(this, arguments); // ejecutar el original (validaciones, guardado, etc.)
+      } catch(e) {
+        console.warn("leadgenSubmit original lanzó error:", e);
+      }
+
+      // 🔹 asegurar que no quede en loading
+      try {
+        if (window.leadgen) {
+          window.leadgen.active = false;
+          window.leadgen.submitted = true;
+          window.leadgen.message = "Thanks!";
+        }
+        if (window.overlay) {
+          window.overlay.active = false;
+          window.overlay.t = 0;
+        }
+        window.paused = false;
+        if (typeof window.GAME !== "undefined") {
+          window.gameState = window.GAME.PLAY;
+        }
+
+        // 🔹 ejecutar el inicio real del juego
+        setTimeout(() => {
+          try {
+            if (typeof window.startLevel === "function") {
+              window.startLevel();
+            } else if (typeof window.startGame === "function") {
+              window.startGame();
+            } else if (typeof window.beginGame === "function") {
+              window.beginGame();
+            } else {
+              console.warn("⚠️ No se encontró función startLevel/startGame/beginGame");
+            }
+          } catch(e2) {
+            console.error("Error al iniciar nivel desde leadgenSubmit:", e2);
+          }
+        }, 300);
+      } catch(e3) {
+        console.error("Leadgen desktop fix error:", e3);
+      }
+    };
+
+    window.leadgenSubmit.__patched = true;
+    console.log("✅ Leadgen desktop fix aplicado");
+  }
+})();
+
