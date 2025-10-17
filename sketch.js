@@ -1972,7 +1972,24 @@ function cropTransparent(src, alphaThreshold=1){
 })();
 
 
-/* === MOBILE FORM REDIRECT GATE (append-only; non-destructive) === */
+// ======== MOBILE RUNTIME GATE (Leadgen OFF on phones) ========
+(function(){
+  try {
+    const ua = navigator.userAgent || "";
+    const touch = (navigator.maxTouchPoints || 0) > 1;
+    const isIPhone = /iPhone|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+    const isIPad = /iPad/i.test(ua) || (touch && /Macintosh/.test(ua)); // iPadOS reports Mac
+    const IS_MOBILE_DEVICE = isIPhone || isAndroid || isIPad;
+
+    if (IS_MOBILE_DEVICE && CFG && CFG.LEADGEN) {
+      CFG.LEADGEN.enabled = false;
+      CFG.LEADGEN.showOnStart = false;
+    }
+  } catch (e) { /* noop */ }
+})();
+// ======== END MOBILE RUNTIME GATE ========
+/* === MOBILE: PERMA-DISABLE LEADGEN + REDIRECT TO form.html (append-only) === */
 (function(){
   const UA = navigator.userAgent||"";
   const touch = (navigator.maxTouchPoints||0) > 0;
@@ -1981,16 +1998,52 @@ function cropTransparent(src, alphaThreshold=1){
   const isIPad = /iPad/i.test(UA) || (touch && /Macintosh/.test(UA));
   const IS_MOBILE = isIPhone || isAndroid || isIPad;
 
-  // Path to external form (same folder as index.html)
-  const FORM_PATH = "form.html";
+  if (!IS_MOBILE) return;
 
-  const RETURN_FLAG = "leadgenReturn";
-  const STORAGE_KEY_NEW = "leadgenData";
-  const K1="leadgen_first", K2="leadgen_last", K3="leadgen_email";
+  // 1) Desactivar y bloquear cualquier leadgen in-canvas en móvil
+  function forceDisableLeadgen(){
+    try {
+      if (window.CFG && window.CFG.LEADGEN){
+        window.CFG.LEADGEN.enabled = false;
+        window.CFG.LEADGEN.showOnStart = false;
+        try {
+          Object.defineProperty(window.CFG.LEADGEN, "enabled", { get: ()=>false, set: ()=>{}, configurable:true });
+          Object.defineProperty(window.CFG.LEADGEN, "showOnStart", { get: ()=>false, set: ()=>{}, configurable:true });
+        } catch(e){}
+      }
+    } catch(e){}
+  }
+
+  // 2) Neutralizar cualquier renderer del leadgen (si existe)
+  function neutralizeLeadgenDraw(){
+    try{
+      if (typeof window.drawLeadgenOverlay === "function"){
+        const noop = function(){ /* leadgen OFF en móvil */ };
+        noop.__nold = true;
+        window.drawLeadgenOverlay = noop;
+      }
+    }catch(e){}
+  }
+
+  // 3) Si alguien manda gameState -> GAME.LEADGEN, rebotar a menú y forzar redirect
+  function guardGameStateAndBounce(){
+    try{
+      const G = window.GAME;
+      if (!G) return;
+      if (window.gameState === G.LEADGEN){
+        window.gameState = G.MENU || window.gameState;
+        tryRedirectIfNeeded();
+      }
+    }catch(e){}
+  }
+
+  // 4) Gate hacia form.html si no hay datos (acepta legacy keys o objeto nuevo)
+  const FORM_PATH = "form.html";             // misma carpeta que index.html
+  const STORAGE_KEY_NEW = "leadgenData";     // objeto {first,last,email}
+  const K1="leadgen_first", K2="leadgen_last", K3="leadgen_email"; // llaves legacy
 
   function hasData(){
     try{
-      // Accept either the new consolidated object or the legacy separate keys
       const obj = JSON.parse(localStorage.getItem(STORAGE_KEY_NEW)||"{}");
       if (obj && obj.first && obj.last && obj.email) return true;
       const a = localStorage.getItem(K1)||"", b=localStorage.getItem(K2)||"", c=localStorage.getItem(K3)||"";
@@ -1999,59 +2052,49 @@ function cropTransparent(src, alphaThreshold=1){
     return false;
   }
 
-  function disableOldLeadgen(){
-    try{
-      if (IS_MOBILE && window.CFG && window.CFG.LEADGEN){
-        window.CFG.LEADGEN.enabled = false;
-        window.CFG.LEADGEN.showOnStart = false;
-      }
-    }catch(e){}
-  }
-
   function goForm(){
     const here = location.href;
     try { sessionStorage.setItem("postReturnTarget", here); } catch(e){}
     location.href = FORM_PATH + "?return=" + encodeURIComponent(here);
   }
 
-  function onReturnResumeIfAny(){
-    try{
-      if (sessionStorage.getItem(RETURN_FLAG) === "1"){
-        sessionStorage.removeItem(RETURN_FLAG);
-        // no-op: your normal start flow continues from menu
-      }
-    }catch(e){}
+  function tryRedirectIfNeeded(){
+    forceDisableLeadgen();
+    neutralizeLeadgenDraw();
+    if (!hasData()) goForm();
   }
 
+  // 5) Envolver starters para asegurar el form antes de iniciar
   function wrapStarter(name){
-    if (typeof window[name] !== "function" || window[name].__mobGateWrapped) return false;
-    const orig = window[name];
-    const wrapped = function(){
-      if (IS_MOBILE && !hasData()){
-        disableOldLeadgen();
-        goForm();
-        return;
-      }
-      return orig.apply(this, arguments);
-    };
-    wrapped.__mobGateWrapped = true;
-    window[name] = wrapped;
-    return true;
+    try{
+      if (typeof window[name] !== "function" || window[name].__mobGateWrapped) return false;
+      const orig = window[name];
+      const wrapped = function(){
+        tryRedirectIfNeeded();
+        return orig.apply(this, arguments);
+      };
+      wrapped.__mobGateWrapped = true;
+      window[name] = wrapped;
+      return true;
+    }catch(e){}
+    return false;
   }
 
   function arm(){
-    if (!IS_MOBILE) return;
-    disableOldLeadgen();
-    onReturnResumeIfAny();
+    forceDisableLeadgen();
+    neutralizeLeadgenDraw();
 
-    const names = ["startLevel","startGame","beginGame"];
-    names.forEach(wrapStarter);
+    const NAMES = ["startLevel","startGame","beginGame"];
+    NAMES.forEach(wrapStarter);
 
-    // Keep trying a bit in case the starter is defined later
+    // Reintenta un rato por si esas funciones se definen más tarde
     let tries=0;
     const t = setInterval(()=>{
-      let any=false; names.forEach(n=> any = wrapStarter(n) || any);
-      if (any || (++tries>200)) clearInterval(t); // ~10s @50ms
+      forceDisableLeadgen();
+      neutralizeLeadgenDraw();
+      guardGameStateAndBounce();
+      let any=false; NAMES.forEach(n=> any = wrapStarter(n) || any);
+      if (any || (++tries>240)) clearInterval(t); // ~12s a 50ms
     }, 50);
   }
 
@@ -2061,5 +2104,4 @@ function cropTransparent(src, alphaThreshold=1){
     arm();
   }
 })();
-/* === END MOBILE FORM REDIRECT GATE === */
-
+ /* === END MOBILE PATCH === */
