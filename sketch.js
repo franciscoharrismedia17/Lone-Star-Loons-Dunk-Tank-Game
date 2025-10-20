@@ -675,13 +675,21 @@ function _ensureGhostInput() {
   });
 
   // Enter = submit
-  _ghostInput.addEventListener('keydown', (ev)=>{
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      leadgenSubmit();
+_ghostInput.addEventListener('keydown', (ev)=>{
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    leadgenSubmit();
+    if (leadgen.submitted === true) {
       _ghostInput.blur();
+    } else {
+      const order = ['first','last','email'];
+      const idx = order.findIndex(k => leadgen.errors && leadgen.errors[k]);
+      if (idx >= 0 && typeof _focusLeadgenFieldByIndex === 'function') {
+        _focusLeadgenFieldByIndex(idx);
+      }
     }
-  });
+  }
+});
 
   return _ghostInput;
 }
@@ -736,20 +744,7 @@ function _blurLeadgen(){
 }
 
 // ---------- Input unificado (mouse/touch/teclado) ----------
-function keyPressed(){
-  resumeAudioIfNeeded();
-  _mobileOnFirstUserGesture(); // [MOBILE] también contamos teclas como primer gesto
 
-  // ... (tu lógica de teclas) ...
-}
-
-function mousePressed(){
-  resumeAudioIfNeeded();
-  _mobileOnFirstUserGesture(); // [MOBILE]
-
-  // ... (tu lógica existente de menú/leadgen/overlay) ...
-  if (gameState !== GAME.LEADGEN && !tutorial.active) beginHold();
-}
 function mouseReleased(){
   resumeAudioIfNeeded();
 
@@ -1386,16 +1381,20 @@ function handleLeadgenMouse(){
   const m = _leadgenWorldMouse();
 
   // Inputs
-  if (leadgen._inputRects) {
-    for (let i = 0; i < leadgen._inputRects.length; i++) {
-      const r = leadgen._inputRects[i];
-      if (m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h) {
-        leadgen.idx = i;
-        leadgen.message = '';
-        _uiClickSound(); // AUDIO: Button al enfocar input
-}
+if (leadgen._inputRects) {
+  for (let i = 0; i < leadgen._inputRects.length; i++) {
+    const r = leadgen._inputRects[i];
+    if (m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h) {
+      leadgen.idx = i;
+      leadgen.message = '';
+      _uiClickSound(); // AUDIO: Button al enfocar input
+      if (typeof _focusLeadgenFieldByIndex === 'function') {
+        _focusLeadgenFieldByIndex(i);     // ⬅️ ENFOCAR SIEMPRE EL GHOST INPUT
+      }
+      return; // ya manejamos el click
     }
   }
+}
   // Submit
   if (leadgen._submitRect) {
     const r = leadgen._submitRect;
@@ -1464,18 +1463,21 @@ function leadgenSubmit() {
   if (!d.last  || d.last.trim()  === '') leadgen.errors.last  = true;
   if (!d.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) leadgen.errors.email = true;
 
-  if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email) {
-    leadgen.submitted = false;
-    leadgen.message = 'Please complete all fields (valid email required).';
-    const order = ['first', 'last', 'email'];
-    for (let i = 0; i < order.length; i++) {
-      if (leadgen.errors[order[i]]) {
-        leadgen.idx = i;
-        break;
+if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email) {
+  leadgen.submitted = false;
+  leadgen.message = 'Please complete all fields (valid email required).';
+  const order = ['first', 'last', 'email'];
+  for (let i = 0; i < order.length; i++) {
+    if (leadgen.errors[order[i]]) {
+      leadgen.idx = i;
+      if (typeof _focusLeadgenFieldByIndex === 'function') {
+        _focusLeadgenFieldByIndex(i);
       }
+      break;
     }
-    return;
   }
+  return; // ⬅️ IMPORTANTE: no cerrar ni iniciar el juego
+}
 
   // Mostrar mensaje de progreso
   leadgen.submitted = true;
