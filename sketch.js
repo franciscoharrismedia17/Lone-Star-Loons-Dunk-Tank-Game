@@ -1393,8 +1393,6 @@ function handleLeadgenMouse(){
         leadgen.idx = i;
         leadgen.message = '';
         _uiClickSound(); // AUDIO: Button al enfocar input
-         _focusLeadgenFieldByIndex(i);
-  return;
 }
     }
   }
@@ -2197,4 +2195,34 @@ function cropTransparent(src, alphaThreshold=1){
     console.log("✅ Leadgen desktop fix aplicado");
   }
 })();
+/* === DESKTOP: DESACTIVAR ENTER GLOBALMENTE (a prueba de balas) === */
+(function () {
+  if (window.__ENTER_KILL_SWITCH__) return;
+  window.__ENTER_KILL_SWITCH__ = true;
 
+  // Solo desktop (en mobile usás form.html con teclado nativo)
+  var ua = navigator.userAgent || "";
+  var IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(ua);
+  if (IS_MOBILE) return;
+
+  function isEnter(ev){
+    // Cubre Enter y NumpadEnter en todos los eventos
+    var k = ev && ev.key ? ev.key : "";
+    return k === "Enter" || k === "NumpadEnter" || ev.keyCode === 13;
+  }
+
+  function hardBlock(ev){
+    if (!isEnter(ev)) return;
+    // Mata por completo el evento en todas las fases
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+    return false;
+  }
+
+  // Capturamos en captura para ganarle a cualquier handler de p5 o del juego
+  ["keydown","keypress","keyup"].forEach(function(type){
+    window.addEventListener(type, hardBlock, { capture: true, passive: false });
+    document.addEventListener(type, hardBlock, { capture: true, passive: false });
+  });
+})();
