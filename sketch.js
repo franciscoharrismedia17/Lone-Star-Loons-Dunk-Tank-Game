@@ -435,21 +435,39 @@ function detectPlatform(){
 }
 async function sendLeadToSheet(payload){
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), 7000);
+  const timeout = setTimeout(()=>controller.abort(), 10000); // 10s por móviles
   try{
     const res = await fetch(LEAD_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type':'application/json' },
+      mode: 'cors',                    // 🔴 importante: CORS explícito
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      redirect: 'follow',
       body: JSON.stringify(payload),
       signal: controller.signal
     });
     clearTimeout(timeout);
-    return await res.json().catch(()=>({ ok:false, error:'Invalid JSON' }));
+
+    // Si vino 200-299 pero sin JSON válido, no revientes:
+    let data = null;
+    try { data = await res.json(); } 
+    catch {
+      const text = await res.text().catch(()=> '');
+      return { ok: false, error: 'Non-JSON response', status: res.status, body: text?.slice(0,200) };
+    }
+
+    // Aceptamos ok:true o cualquier 2xx con algún id de fila
+    if (res.ok && (data?.ok === true || data?.status === 'ok' || data?.rowIndex != null)) {
+      return { ok: true, ...data };
+    }
+    return { ok: false, error: data?.error || 'App returned not-ok', status: res.status, data };
   }catch(err){
     clearTimeout(timeout);
-    return { ok:false, error:String(err) };
+    return { ok:false, error:String(err?.message || err) };
   }
 }
+
 
 // ---------- Preload (IMAGEN + SONIDO) ----------
 function preload(){
@@ -1522,16 +1540,15 @@ async function leadgenSubmit(){
   const res = await sendLeadToSheet(payload);
 
   if (res.ok) {
-    leadgen.submitted = true;
-    leadgen.message = "Lead saved!";
-    playSfx('SUCCESS');
-  } else {
-    leadgen.submitted = false;
-    leadgen.message = "Saved locally.";
-    playSfx('FAIL');
-  }
+  leadgen.submitted = true;
+  leadgen.message = "Lead saved!";
+  playSfx('SUCCESS');
+  // cerrar/avanzar
+  setTimeout(()=>{
+    leadgen.active = false;
+    gameState = GAME.PLAY; // o startLevel();
+  }, 600);
 }
-
 
 
 
