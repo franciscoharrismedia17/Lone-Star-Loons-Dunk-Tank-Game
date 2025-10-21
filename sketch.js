@@ -425,7 +425,7 @@ let leadgen = {
   _submitRect:null
 };
 // === LEADGEN → Google Sheets ===
-const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyv-qU1mXjgNDYTlH4ekBNikHpjOLam5QNGkfkmdQ5DxQ9U_5MZj4gC0zDvvzesE-GO/exec';
+const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycby0UR786FnUdxstkrUjL3suFCkZncZMa5lJ1QlLz2s/dev';
 
 function detectPlatform(){
   const ua = navigator.userAgent || '';
@@ -433,7 +433,6 @@ function detectPlatform(){
     || (window.matchMedia && window.matchMedia('(max-width: 850px)').matches);
   return { platform: isMobile ? 'mobile' : 'desktop', userAgent: ua };
 }
-
 async function sendLeadToSheet(payload){
   const controller = new AbortController();
   const timeout = setTimeout(()=>controller.abort(), 7000);
