@@ -56,7 +56,8 @@
 
 <script>
 (function(){
-  const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyv-qU1mXjgNDYTlH4ekBNikHpjOLam5QNGkfkmdQ5DxQ9U_5MZj4gC0zDvvzesE-GO/exec';
+const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycby0UR786rFuNdstxrUjL3suFCkZnCzMa5U1QlL2s/exec';
+;
   const q = new URLSearchParams(location.search);
   const ret = q.get("return") || sessionStorage.getItem("postReturnTarget") || (location.origin + "/");
   const STORAGE_KEY = "leadgenData";

@@ -425,7 +425,7 @@ let leadgen = {
   _submitRect:null
 };
 // === LEADGEN → Google Sheets ===
-const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycby0UR786FnUdxstkrUjL3suFCkZncZMa5lJ1QlLz2s/dev';
+const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycby0UR786rFuNdstxrUjL3suFCkZnCzMa5U1QlL2s/exec';
 
 function detectPlatform(){
   const ua = navigator.userAgent || '';
