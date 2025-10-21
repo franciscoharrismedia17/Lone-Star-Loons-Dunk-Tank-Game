@@ -424,6 +424,33 @@ let leadgen = {
   _inputRects:null,
   _submitRect:null
 };
+// === LEADGEN → Google Sheets ===
+const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyv-qU1mXjgNDYTlH4ekBNikHpjOLam5QNGkfkmdQ5DxQ9U_5MZj4gC0zDvvzesE-GO/exec';
+
+function detectPlatform(){
+  const ua = navigator.userAgent || '';
+  const isMobile = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua)
+    || (window.matchMedia && window.matchMedia('(max-width: 850px)').matches);
+  return { platform: isMobile ? 'mobile' : 'desktop', userAgent: ua };
+}
+
+async function sendLeadToSheet(payload){
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), 7000);
+  try{
+    const res = await fetch(LEAD_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    return await res.json().catch(()=>({ ok:false, error:'Invalid JSON' }));
+  }catch(err){
+    clearTimeout(timeout);
+    return { ok:false, error:String(err) };
+  }
+}
 
 // ---------- Preload (IMAGEN + SONIDO) ----------
 function preload(){
@@ -1454,7 +1481,7 @@ function handleLeadgenKeyTyped(){
 }
 
 // Enviar formulario (Leadgen)
-function leadgenSubmit() {
+async function leadgenSubmit(){
   const d = leadgen.data;
   leadgen.errors = {};
 
@@ -1463,72 +1490,57 @@ function leadgenSubmit() {
   if (!d.last  || d.last.trim()  === '') leadgen.errors.last  = true;
   if (!d.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) leadgen.errors.email = true;
 
-if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email) {
-  leadgen.submitted = false;
-  leadgen.message = 'Please complete all fields (valid email required).';
-  const order = ['first', 'last', 'email'];
-  for (let i = 0; i < order.length; i++) {
-    if (leadgen.errors[order[i]]) {
-      leadgen.idx = i;
-      if (typeof _focusLeadgenFieldByIndex === 'function') {
-        _focusLeadgenFieldByIndex(i);
+  if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email) {
+    leadgen.submitted = false;
+    leadgen.message = 'Please complete all fields (valid email required).';
+    const order = ['first', 'last', 'email'];
+    for (let i = 0; i < order.length; i++) {
+      if (leadgen.errors[order[i]]) {
+        leadgen.idx = i;
+        if (typeof _focusLeadgenFieldByIndex === 'function') _focusLeadgenFieldByIndex(i);
+        break;
       }
-      break;
     }
+    return;
   }
-  return; // ⬅️ IMPORTANTE: no cerrar ni iniciar el juego
-}
 
-  // Mostrar mensaje de progreso
+  // Guardar localmente
+  try {
+    localStorage.setItem('leadgen_first', d.first);
+    localStorage.setItem('leadgen_last',  d.last);
+    localStorage.setItem('leadgen_email', d.email);
+  } catch(e){}
+
+  // Mostrar feedback
   leadgen.submitted = true;
   leadgen.message = 'Thanks! Loading…';
 
-  // Guardar datos en localStorage
-  try {
-    localStorage.setItem('leadgen_first', d.first);
-    localStorage.setItem('leadgen_last', d.last);
-    localStorage.setItem('leadgen_email', d.email);
-    localStorage.setItem('leadgenData', JSON.stringify({
-      first: d.first, last: d.last, email: d.email, ts: Date.now()
-    }));
-  } catch (e) {}
+  // --- NUEVO: enviar al Google Sheet ---
+  const meta = detectPlatform();
+  const payload = {
+    first: d.first.trim(),
+    last: d.last.trim(),
+    email: d.email.trim(),
+    platform: meta.platform,
+    userAgent: meta.userAgent
+  };
+  const result = await sendLeadToSheet(payload);
+  if (!result.ok) {
+    console.warn('Lead post failed:', result.error);
+    leadgen.message = 'Saved locally (offline).';
+  } else {
+    leadgen.message = 'Lead saved!';
+  }
 
-  // Cerrar overlay visual
+  // Cerrar overlay y empezar el juego
   _blurLeadgen();
   leadgen.active = false;
-  paused = false;
-  overlay.active = false;
-  overlay.t = 0;
-
-  // Reiniciar parámetros
-  if (typeof hitsThisLevel !== 'undefined') hitsThisLevel = 0;
-  if (typeof currentLevelIndex !== 'undefined') currentLevelIndex = 0;
-
-  // 🔹 Asegurar estado de juego
-  try {
-    if (typeof GAME !== 'undefined') gameState = GAME.PLAY;
-  } catch (e) {}
-
-  // 🔹 Intentar iniciar el nivel; si algo falla, reintentar
-  const safeStart = () => {
-    try {
-      if (typeof startLevel === 'function') {
-        startLevel();
-      } else if (typeof startGame === 'function') {
-        startGame();
-      } else if (typeof beginGame === 'function') {
-        beginGame();
-      } else {
-        console.warn('⚠️ No se encontró función de inicio (startLevel/startGame/beginGame)');
-      }
-    } catch (e) {
-      console.error('LeadgenSubmit → error al iniciar:', e);
-    }
-  };
-
-  // Esperar un poco por si hay crossfade o música cargando
-  setTimeout(safeStart, 500);
+  if (typeof GAME !== 'undefined') gameState = GAME.PLAY;
+  setTimeout(()=>{
+    if (typeof startLevel === 'function') startLevel();
+  }, 600);
 }
+
 
 
 // ---------- Viento visual (overlay) ----------

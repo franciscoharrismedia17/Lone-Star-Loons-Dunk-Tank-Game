@@ -56,6 +56,7 @@
 
 <script>
 (function(){
+  const LEAD_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyv-qU1mXjgNDYTlH4ekBNikHpjOLam5QNGkfkmdQ5DxQ9U_5MZj4gC0zDvvzesE-GO/exec';
   const q = new URLSearchParams(location.search);
   const ret = q.get("return") || sessionStorage.getItem("postReturnTarget") || (location.origin + "/");
   const STORAGE_KEY = "leadgenData";
@@ -87,17 +88,33 @@
   // Focus inmediato al cargar (ayuda iOS)
   setTimeout(()=> first.focus(), 0);
 
-  form.addEventListener("submit", (e)=>{
+  form.addEventListener("submit", async (e)=>{
     e.preventDefault();
     if (!emailOK(email.value.trim())) return update();
+
+    const payload = {
+      first: first.value.trim(),
+      last:  last.value.trim(),
+      email: email.value.trim(),
+      platform: /Mobile|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+      userAgent: navigator.userAgent
+    };
+
+    // Guardar localmente
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        first: first.value.trim(),
-        last:  last.value.trim(),
-        email: email.value.trim(),
-        ts: Date.now()
-      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...payload, ts: Date.now() }));
     } catch (e) {}
+
+    // Enviar al Google Sheet
+    try {
+      await fetch(LEAD_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.warn('Lead post failed:', err);
+    }
 
     // Marcar retorno y volver al juego
     try { sessionStorage.setItem("leadgenReturn", "1"); } catch(e) {}
