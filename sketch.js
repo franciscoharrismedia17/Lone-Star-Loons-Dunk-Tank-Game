@@ -1492,54 +1492,48 @@ async function leadgenSubmit(){
 
   if (leadgen.errors.first || leadgen.errors.last || leadgen.errors.email) {
     leadgen.submitted = false;
-    leadgen.message = 'Please complete all fields (valid email required).';
-    const order = ['first', 'last', 'email'];
-    for (let i = 0; i < order.length; i++) {
-      if (leadgen.errors[order[i]]) {
-        leadgen.idx = i;
-        if (typeof _focusLeadgenFieldByIndex === 'function') _focusLeadgenFieldByIndex(i);
-        break;
-      }
-    }
+    leadgen.message = "Please complete all fields correctly.";
+    playSfx('FAIL');
     return;
   }
 
-  // Guardar localmente
-  try {
-    localStorage.setItem('leadgen_first', d.first);
-    localStorage.setItem('leadgen_last',  d.last);
-    localStorage.setItem('leadgen_email', d.email);
-  } catch(e){}
+  // Mostrar que se está enviando
+  leadgen.message = "Sending...";
+  leadgen.submitted = false;
+  playSfx('Button');
 
-  // Mostrar feedback
-  leadgen.submitted = true;
-  leadgen.message = 'Thanks! Loading…';
-
-  // --- NUEVO: enviar al Google Sheet ---
-  const meta = detectPlatform();
+  // Detectar plataforma
+  const info = detectPlatform();
   const payload = {
     first: d.first.trim(),
-    last: d.last.trim(),
+    last:  d.last.trim(),
     email: d.email.trim(),
-    platform: meta.platform,
-    userAgent: meta.userAgent
+    platform: info.platform,
+    userAgent: info.userAgent
   };
-  const result = await sendLeadToSheet(payload);
-  if (!result.ok) {
-    console.warn('Lead post failed:', result.error);
-    leadgen.message = 'Saved locally (offline).';
-  } else {
-    leadgen.message = 'Lead saved!';
-  }
 
-  // Cerrar overlay y empezar el juego
-  _blurLeadgen();
-  leadgen.active = false;
-  if (typeof GAME !== 'undefined') gameState = GAME.PLAY;
-  setTimeout(()=>{
-    if (typeof startLevel === 'function') startLevel();
-  }, 600);
+  // Guardar localmente
+  try {
+    localStorage.setItem('leadgen_first', d.first.trim());
+    localStorage.setItem('leadgen_last', d.last.trim());
+    localStorage.setItem('leadgen_email', d.email.trim());
+  } catch(e){}
+
+  // Enviar al Google Sheet
+  const res = await sendLeadToSheet(payload);
+
+  if (res.ok) {
+    leadgen.submitted = true;
+    leadgen.message = "Lead saved!";
+    playSfx('SUCCESS');
+  } else {
+    leadgen.submitted = false;
+    leadgen.message = "Saved locally.";
+    playSfx('FAIL');
+  }
 }
+
+
 
 
 
