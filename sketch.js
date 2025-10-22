@@ -8,7 +8,18 @@
 // ✅ SFX: BallThrow, SUCCESS, FAIL, ALMOST, SPLASH, Button (con antispam).
 // ✅ Triggers insertados en puntos pedidos (comentados con // AUDIO: ...).
 
+let NEEDS_GFX_RESET = false;
 
+function resetGraphicsState(){
+  imageMode(CORNER);
+  rectMode(CORNER);
+  ellipseMode(CENTER);
+  noTint();
+  blendMode(BLEND);
+  strokeWeight(1);
+  noStroke();
+  noFill();
+}
 
 
 // ============= AUDIO CONFIG (Editar aquí para ajustar volúmenes globalmente) =============
@@ -946,6 +957,16 @@ function startLevel(){
 
   // AUDIO: asegurar que si veníamos de LEVELCOMPLETE, vuelva la MAINMUSIC (crossfade si aplica)
   playMusic('MAINMUSIC');
+  // 🧽 Limpieza de estado gráfico (evita que los assets se vean raros)
+  imageMode(CORNER);
+  rectMode(CORNER);
+  ellipseMode(CENTER);
+  tint(255);       // o noTint();
+  noTint();
+  blendMode(BLEND);
+  strokeWeight(1);
+  stroke(0,0);     // o noStroke();
+  noFill();
 }
 
 function endLevel(reason){
@@ -1162,6 +1183,18 @@ function render(){
 
   clear();
   beginViewport();
+  if (NEEDS_GFX_RESET) { resetGraphicsState(); NEEDS_GFX_RESET = false; }
+  // Estado gráfico limpio por si alguna función dejó algo seteado
+imageMode(CORNER);
+rectMode(CORNER);
+ellipseMode(CENTER);
+tint(255);      // o noTint();
+noTint();
+blendMode(BLEND);
+strokeWeight(1);
+stroke(0,0);    // o noStroke();
+noFill();
+
 
   if (IMG_BG) image(IMG_BG, 0, 0, BASE_W, BASE_H);
 
@@ -1527,37 +1560,34 @@ async function leadgenSubmit(){
 
   // Guardar localmente
   try {
-    localStorage.setItem('leadgen_first', d.first.trim());
-    localStorage.setItem('leadgen_last', d.last.trim());
-    localStorage.setItem('leadgen_email', d.email.trim());
-  } catch(e){}
+  localStorage.setItem('leadgen_first', d.first.trim());
+  localStorage.setItem('leadgen_last',  d.last.trim());
+  localStorage.setItem('leadgen_email', d.email.trim());
+} catch(e){}
 
-  // Enviar al Google Sheet
- const res = await sendLeadToSheet(payload);
+// Enviar al Google Sheet
+const res = await sendLeadToSheet(payload);
 
-  if (res.ok) {
-    leadgen.submitted = true;
-    leadgen.message = "Lead saved!";
-    playSfx('SUCCESS');
-    // cerrar/avanzar
-    setTimeout(()=>{
-      leadgen.active = false;
-      gameState = GAME.PLAY; // o startLevel();
-    }, 600);
-  } else {
-  // ✅ Permitir jugar aunque solo se haya guardado localmente
-  leadgen.submitted = true;                // <- señal para el wrapper de que puede cerrar
-  leadgen.message = "Saved locally.";
-  playSfx('FAIL');
-  setTimeout(()=>{
-    leadgen.active = false;
-    if (typeof GAME !== "undefined") gameState = GAME.PLAY;
-    if (typeof startLevel === "function") startLevel();
-    else if (typeof startGame === "function") startGame();
-    else if (typeof beginGame === "function") beginGame();
-  }, 800);
-}
-} // ← ← ← ESTA llave faltaba
+// 🧽 limpiar YA (antes de pasar a PLAY) + marcar para el primer frame
+resetGraphicsState();
+NEEDS_GFX_RESET = true;
+
+// Mensajes y sfx
+leadgen.submitted = true; // dejamos jugar igual si falla
+leadgen.message   = res.ok ? "Lead saved!" : "Saved locally.";
+playSfx(res.ok ? 'SUCCESS' : 'FAIL');
+
+// Cerrar overlay y pasar a PLAY
+leadgen.active = false;
+if (typeof GAME !== "undefined") gameState = GAME.PLAY;
+
+// Arrancar juego tras un pequeño delay (deja dibujar 1 frame limpio)
+setTimeout(()=>{
+  if (typeof startLevel === "function") startLevel();
+  else if (typeof startGame === "function") startGame();
+  else if (typeof beginGame === "function") beginGame();
+}, 300);
+} // ← ← ← ESTA llave cierra tu función (dejala)
 
 
 
