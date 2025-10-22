@@ -436,38 +436,33 @@ function detectPlatform(){
 }
 async function sendLeadToSheet(payload){
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), 10000); // 10s por móviles
-  try{
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s
+
+  try {
+    // 👉 form-data sin headers para evitar preflight
+    const body = new URLSearchParams(payload);
     const res = await fetch(LEAD_ENDPOINT, {
       method: 'POST',
-      mode: 'cors',                    // 🔴 importante: CORS explícito
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      redirect: 'follow',
-      body: JSON.stringify(payload),
+      body,
       signal: controller.signal
     });
     clearTimeout(timeout);
 
-    // Si vino 200-299 pero sin JSON válido, no revientes:
+    // Apps Script puede devolver JSON o string; manejá ambos
     let data = null;
-    try { data = await res.json(); } 
-    catch {
-      const text = await res.text().catch(()=> '');
-      return { ok: false, error: 'Non-JSON response', status: res.status, body: text?.slice(0,200) };
-    }
+    try { data = await res.json(); }
+    catch { data = { ok: res.ok }; }
 
-    // Aceptamos ok:true o cualquier 2xx con algún id de fila
-    if (res.ok && (data?.ok === true || data?.status === 'ok' || data?.rowIndex != null)) {
-      return { ok: true, ...data };
+    if (res.ok && (data?.ok === true || data?.status === 'ok')) {
+      return { ok: true, data };
     }
-    return { ok: false, error: data?.error || 'App returned not-ok', status: res.status, data };
-  }catch(err){
+    return { ok:false, error: data?.error || 'App returned not-ok', status: res.status, data };
+  } catch (err) {
     clearTimeout(timeout);
-    return { ok:false, error:String(err?.message || err) };
+    return { ok:false, error: String(err?.message || err) };
   }
 }
+
 
 
 // ---------- Preload (IMAGEN + SONIDO) ----------
