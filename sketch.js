@@ -1537,18 +1537,31 @@ async function leadgenSubmit(){
   } catch(e){}
 
   // Enviar al Google Sheet
-  const res = await sendLeadToSheet(payload);
+ const res = await sendLeadToSheet(payload);
 
   if (res.ok) {
-  leadgen.submitted = true;
-  leadgen.message = "Lead saved!";
-  playSfx('SUCCESS');
-  // cerrar/avanzar
+    leadgen.submitted = true;
+    leadgen.message = "Lead saved!";
+    playSfx('SUCCESS');
+    // cerrar/avanzar
+    setTimeout(()=>{
+      leadgen.active = false;
+      gameState = GAME.PLAY; // o startLevel();
+    }, 600);
+  } else {
+  // ✅ Permitir jugar aunque solo se haya guardado localmente
+  leadgen.submitted = true;                // <- señal para el wrapper de que puede cerrar
+  leadgen.message = "Saved locally.";
+  playSfx('FAIL');
   setTimeout(()=>{
     leadgen.active = false;
-    gameState = GAME.PLAY; // o startLevel();
-  }, 600);
+    if (typeof GAME !== "undefined") gameState = GAME.PLAY;
+    if (typeof startLevel === "function") startLevel();
+    else if (typeof startGame === "function") startGame();
+    else if (typeof beginGame === "function") beginGame();
+  }, 800);
 }
+} // ← ← ← ESTA llave faltaba
 
 
 
@@ -2051,7 +2064,7 @@ function cropTransparent(src, alphaThreshold=1){
 // ======== END MOBILE RUNTIME GATE ========
 /* === MOBILE: PERMA-DISABLE LEADGEN + REDIRECT TO form.html (append-only) === */
 (function(){
-  const UA = navigator.userAgent||"";
+  const UA = navigator.userAgent || "";
   const touch = (navigator.maxTouchPoints||0) > 0;
   const isIPhone = /iPhone|iPod/i.test(UA);
   const isAndroid = /Android/i.test(UA);
@@ -2059,6 +2072,22 @@ function cropTransparent(src, alphaThreshold=1){
   const IS_MOBILE = isIPhone || isAndroid || isIPad;
 
   if (!IS_MOBILE) return;
+  
+    // (Ejemplo) si no hay lead guardado, mandar al form y volver al juego
+  const hasLead = (() => {
+    try { return !!JSON.parse(localStorage.getItem("leadgenData")||"{}").email; }
+    catch { return false; }
+  })();
+
+  if (!hasLead) {
+    try { sessionStorage.setItem("postReturnTarget", location.href); } catch(e){}
+    location.replace("form.html?return=" + encodeURIComponent(location.href));
+    return; // termina la rama móvil
+  }
+
+  // (Ejemplo) si hay lead, apagá el overlay
+  window.leadgen = window.leadgen || {};
+  leadgen.active = false;
 
   // 1) Desactivar y bloquear cualquier leadgen in-canvas en móvil
   function forceDisableLeadgen(){
@@ -2179,40 +2208,28 @@ function cropTransparent(src, alphaThreshold=1){
       }
 
       // 🔹 asegurar que no quede en loading
-      try {
-        if (window.leadgen) {
-          window.leadgen.active = false;
-          window.leadgen.submitted = true;
-          window.leadgen.message = "Thanks!";
-        }
-        if (window.overlay) {
-          window.overlay.active = false;
-          window.overlay.t = 0;
-        }
-        window.paused = false;
-        if (typeof window.GAME !== "undefined") {
-          window.gameState = window.GAME.PLAY;
-        }
+      // Solo cerrar si el submit dejó estado de éxito
+try {
+  const okToClose =
+    (window.leadgen && window.leadgen.submitted === true) ||
+    (window.leadgen && typeof window.leadgen.message === 'string' &&
+     window.leadgen.message.toLowerCase().includes('saved locally'));
 
-        // 🔹 ejecutar el inicio real del juego
-        setTimeout(() => {
-          try {
-            if (typeof window.startLevel === "function") {
-              window.startLevel();
-            } else if (typeof window.startGame === "function") {
-              window.startGame();
-            } else if (typeof window.beginGame === "function") {
-              window.beginGame();
-            } else {
-              console.warn("⚠️ No se encontró función startLevel/startGame/beginGame");
-            }
-          } catch(e2) {
-            console.error("Error al iniciar nivel desde leadgenSubmit:", e2);
-          }
-        }, 300);
-      } catch(e3) {
-        console.error("Leadgen desktop fix error:", e3);
-      }
+  if (okToClose) {
+    window.leadgen.active = false;
+    if (window.overlay) { window.overlay.active = false; window.overlay.t = 0; }
+    window.paused = false;
+    if (typeof window.GAME !== "undefined") window.gameState = window.GAME.PLAY;
+    setTimeout(() => {
+      try {
+        if (typeof startLevel === "function") startLevel();
+        else if (typeof startGame === "function") startGame();
+        else if (typeof beginGame === "function") beginGame();
+      } catch(e2) { console.error("Error al iniciar nivel desde leadgenSubmit:", e2); }
+    }, 300);
+  }
+} catch(e3) { console.error("Leadgen desktop fix error:", e3); }
+
     };
 
     window.leadgenSubmit.__patched = true;
